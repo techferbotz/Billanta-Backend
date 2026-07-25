@@ -16,7 +16,10 @@ export interface ErrorResponse {
 }
 
 // Send a standard success response: { success: true, data: ... }.
-// `data` defaults to {} for endpoints with no payload (e.g. logout, delete).
+//
+// `undefined` (an endpoint with no payload — e.g. logout, delete) becomes `{}`. An explicit
+// `null` is PRESERVED — e.g. `GET /company` returns `data: null` when no company is set up
+// yet. (Using `data ?? {}` here would wrongly coerce that null to `{}`.)
 export const sendSuccess = <T>(res: Response, data?: T, status = 200): void => {
-  res.status(status).json({ success: true, data: data ?? {} });
+  res.status(status).json({ success: true, data: data === undefined ? {} : data });
 };
