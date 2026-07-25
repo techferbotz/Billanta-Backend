@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "rootDir": "src",
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"],
+  // ts-node / ts-node-dev only compile files as they're imported, so they miss ambient
+  // global augmentations that aren't imported anywhere (here: src/types/express.d.ts,
+  // which adds req.userId). `files: true` makes them load the `include` list like `tsc`
+  // does, so those types resolve under `npm run dev` as well as under `npm run build`.
+  "ts-node": {
+    "files": true
+  }
+}

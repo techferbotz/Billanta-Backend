@@ -1,0 +1,53 @@
+# LOCAL development only. Production runs on EC2 — see docker-compose.prod.yml and
+# docs/DEPLOY.md.
+#
+# Typical local loop (run the DB in Docker, the app on the host for hot reload):
+#   docker compose up -d db
+#   npm run prisma:migrate        # discrete step — migrations NEVER run on container start
+#   npm run dev                   # http://localhost:3000
+#
+# To test the built image instead:
+#   docker compose up --build     # app on http://localhost:3000
+
+name: billanta
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: billanta
+      POSTGRES_PASSWORD: billanta
+      POSTGRES_DB: billanta
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billanta -d billanta"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://billanta:billanta@db:5432/billanta?schema=public"
+      # These four are required by src/config/env.ts, which fails fast on startup —
+      # without them the container crash-loops before app.listen. Any value works locally.
+      JWT_SECRET: "local-dev-jwt-secret"
+      GOOGLE_CLIENT_ID: "local-dev-google-client-id.apps.googleusercontent.com"
+      ADMIN_API_KEY: "local-dev-admin-key"
+      # Optional: enables the admin panel login at GET /admin.
+      ADMIN_PANEL_USER: "admin"
+      ADMIN_PANEL_PASSWORD: "admin"
+      PORT: "3000"
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

@@ -1,0 +1,56 @@
+# Production stack for an EC2 host whose PostgreSQL runs as a HOST SERVICE (installed on
+# the instance, not a container). This compose therefore runs NO Postgres — the app
+# connects out to the host's.
+#
+# Isolation (why this can't disturb another project sharing the box):
+#   - `name: billanta` -> container/network are `billanta_*`; no name clashes.
+#   - The app publishes ONLY on 127.0.0.1, so it is reachable by host nginx and never
+#     directly from the internet. TLS terminates at nginx (certbot) — see docs/DEPLOY.md.
+#   - No Postgres container, and this stack opens no database port.
+#
+# The app reaches the host Postgres via `host.docker.internal`, which `extra_hosts:
+# host-gateway` maps to the host on Linux/EC2. DATABASE_URL (in .env) must use that host.
+# Keep port 5432 CLOSED in the EC2 security group.
+#
+# Usage (full runbook in docs/DEPLOY.md):
+#   docker compose -f docker-compose.prod.yml run --rm --build migrate
+#   docker compose -f docker-compose.prod.yml up -d --build app
+#
+# ⚠️ `run --rm migrate` WITHOUT `--build` happily runs a STALE image and reports
+#    "No pending migrations" — always pass --build, and rebuild the app too so its
+#    regenerated Prisma client matches the new schema.
+
+name: billanta
+
+services:
+  # ---- The API app: built from the repo Dockerfile (runner stage) --------------
+  app:
+    build:
+      context: .
+      target: runner
+    restart: unless-stopped
+    env_file: .env
+    # Publish ONLY on loopback so only host nginx can reach it. Change the host port
+    # (left of the colon) if it's taken; 3000 (right) is the in-container port from the
+    # Dockerfile and should stay.
+    ports:
+      - "127.0.0.1:${APP_HOST_PORT:-8091}:3000"
+    # Reach the host's PostgreSQL (a separate service on the EC2, not a container).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # ---- One-off DB migration (does NOT run on `up`) -----------------------------
+  # Uses the Dockerfile `builder` stage because the Prisma CLI is a dev dependency,
+  # absent from the slim runtime image. Migrations are a DISCRETE step, never part of
+  # container start — an app restart must never silently alter the schema.
+  #   docker compose -f docker-compose.prod.yml run --rm --build migrate
+  migrate:
+    build:
+      context: .
+      target: builder
+    env_file: .env
+    command: npx prisma migrate deploy
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: ["tools"] # excluded from `up`; only started via `run`

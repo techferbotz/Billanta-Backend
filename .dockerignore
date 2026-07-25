@@ -1,0 +1,29 @@
+# Keep the build context small and never ship secrets or local cruft.
+# NOTE: do NOT ignore prisma/, src/, tsconfig.json or package*.json — the build needs them.
+
+# Dependencies / build output (reinstalled & recompiled inside the image)
+node_modules
+dist
+
+# Local environment & secrets
+.env
+.env.*
+
+# Git / editor / OS
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docker & docs (not needed at runtime)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+docs
+*.md
+
+# Logs
+*.log
+npm-debug.log*

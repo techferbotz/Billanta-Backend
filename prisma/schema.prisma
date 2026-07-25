@@ -1,0 +1,406 @@
+// Prisma schema for the Billanta backend.
+//
+// Run `npm run prisma:generate` after editing, and `npm run prisma:migrate` to apply
+// changes to the database. Migrations are ALWAYS a discrete step — they never run on
+// container start (see docs/DEPLOY.md).
+//
+// The schema grows one build phase at a time:
+//   Phase 1 (this file)  — datasource + generator only, no models yet.
+//   Phase 2              — User, RefreshToken
+//   Phase 3              — Company, Customer, Settings
+//   Phase 4              — Template, TemplateVersion
+//   Phase 5              — Invoice, InvoiceItem
+//
+// Prisma is PINNED to 6.x on purpose: v7 removes `url = env("DATABASE_URL")` from the
+// schema and requires a prisma.config.ts plus a driver adapter. `prisma generate` prints
+// a "v7 available" nudge — ignore it, and don't `npm update` Prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------------
+// Phase 2 — auth
+// ---------------------------------------------------------------------------------
+
+/// An application user. Created on first Google sign-in.
+///
+/// Login is OPTIONAL in Billanta — the Android app creates invoices, renders templates
+/// and makes PDFs entirely offline. A User exists only to unlock cloud features (sync,
+/// media, premium templates), so nothing here is on the critical path for invoicing.
+model User {
+  id        String   @id @default(uuid())
+  /// Google's stable subject id (`sub`). The real identity key — an email can change.
+  googleId  String   @unique
+  email     String   @unique
+  name      String
+  photoUrl  String?
+  /// Gates premium templates. Enforced server-side in the template module.
+  isPremium Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+  // Cloud data owned by this user. All `onDelete: Cascade`, so DELETE /users/me removes
+  // everything in one statement — the Google Play deletion obligation.
+  company       Company?
+  customers     Customer[]
+  settings      Settings?
+  invoices      Invoice[]
+}
+
+/// One issued refresh token. Access tokens are short-lived JWTs and are NOT stored;
+/// these are the long-lived credential, so they get real bookkeeping.
+///
+/// Security properties this model exists to provide:
+///   - Only a SHA-256 hash is ever persisted (`tokenHash`) — a database dump cannot be
+///     replayed against the API.
+///   - Every refresh ROTATES: the presented token is revoked and linked to its successor
+///     via `replacedById`, so each token is usable exactly once.
+///   - Presenting an already-revoked token means the raw value leaked (an attacker and
+///     the real client both hold it). That is treated as theft: every live token for the
+///     user is revoked, forcing a fresh sign-in. See auth.service.ts.
+model RefreshToken {
+  id String @id @default(uuid())
+
+  userId    String
+  /// SHA-256 (hex) of the raw token. NEVER the raw value.
+  ///
+  /// Plain SHA-256 rather than bcrypt/argon2 is correct here: the token is 256 bits of
+  /// CSPRNG output, so there is no guessable input to slow down, and a fast unique-index
+  /// lookup is exactly what verification needs.
+  tokenHash String @unique
+
+  expiresAt    DateTime
+  /// Set when the token is rotated away, logged out, or revoked as part of a theft response.
+  revokedAt    DateTime?
+  /// The RefreshToken.id issued in exchange for this one. Deliberately a plain column,
+  /// not a relation: it exists for audit/debugging, and theft response revokes every
+  /// token for the user rather than walking the chain.
+  replacedById String?
+  /// Best-effort device hint for the user-facing "signed-in devices" list. Never trusted.
+  userAgent    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------------
+// Phase 3 — the seller profile, their customers, and per-user settings
+// ---------------------------------------------------------------------------------
+
+/// The seller's business profile — the "from" block printed on every invoice.
+///
+/// V1 is ONE business per user, so `userId` is `@unique`. That is a deliberate,
+/// reversible choice: to support multiple businesses later, drop the `@unique`, add
+/// `@@unique([userId, id])`, and give Invoice a `companyId`. Nothing else here bakes in
+/// the single-business assumption.
+///
+/// Every invoice stores a SNAPSHOT of these fields at issue time (Phase 5), so editing the
+/// profile never rewrites the past — which is why nothing in this model is versioned.
+model Company {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  name             String
+  logoUrl          String?
+  logoThumbnailUrl String?
+
+  // Tax identity. `gstin`, when present, is validated to the 15-char GSTIN format.
+  // `stateCode` (the 2-digit GST state code) drives the CGST+SGST vs IGST split in Phase 5.
+  gstin     String?
+  stateCode String?
+
+  // Postal address.
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  pincode      String?
+  country      String  @default("India")
+
+  phone String?
+  email String?
+
+  // Payment details shown on the invoice so a customer can pay.
+  signatureUrl      String?
+  upiId             String?
+  qrImageUrl        String?
+  bankName          String?
+  bankAccountNumber String?
+  bankIfsc          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// A customer the seller bills — the "to" block on an invoice.
+///
+/// The `id` is CLIENT-SUPPLIED (a uuid the Android app generates offline), so a customer
+/// created with no network syncs later without a server round-trip and without id
+/// collisions. Writes are idempotent by (userId, id): re-creating the same id updates
+/// rather than duplicates. `@default(uuid())` only covers the rare server-side create.
+model Customer {
+  id     String @id @default(uuid())
+  userId String
+
+  name  String
+  phone String?
+  email String?
+  gstin String?
+
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  stateCode    String?
+  pincode      String?
+  country      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Search hits these: `?q=` matches name and phone. Both indexes are user-scoped so one
+  // user's search never scans another's rows.
+  @@index([userId, name])
+  @@index([userId, phone])
+}
+
+// ---------------------------------------------------------------------------------
+// Phase 4 — templates
+// ---------------------------------------------------------------------------------
+
+/// The lifecycle state of a single template version.
+enum TemplateVersionStatus {
+  Draft // compiled, under review; not servable to clients
+  Published // the immutable, cacheable artifact clients download
+  Archived // was published, superseded by a newer version
+}
+
+/// A template a user can pick for their invoices. This row is the STABLE identity
+/// (a slug like "classic"); the actual render tree lives in its versions.
+///
+/// `currentVersionId` points at the one Published version clients get by default. Making
+/// the template a thin pointer to versioned, immutable artifacts is what lets the client
+/// cache a compiled template by (templateId, version) forever — see TemplateVersion.
+model Template {
+  /// Human-readable slug, e.g. "classic". Chosen by the operator, stable forever.
+  id           String  @id
+  name         String
+  description  String?
+  category     String?
+  thumbnailUrl String?
+  /// Premium templates are ENFORCED server-side: /templates/:id/compiled 403s unless the
+  /// caller is signed in and isPremium. They still appear in listings, for upsell.
+  isPremium    Boolean @default(false)
+  /// A soft on/off switch for the whole template (hidden from listings when false),
+  /// distinct from a version's publish state.
+  isActive     Boolean @default(true)
+  /// Display order in the picker (ascending).
+  orderIndex   Int     @default(0)
+
+  /// The Published version served by default. Nullable until the first publish. Not a
+  /// relation FK (would create a cycle with TemplateVersion.template); resolved by id.
+  currentVersionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions TemplateVersion[]
+}
+
+/// One compiled version of a template. PUBLISHED VERSIONS ARE IMMUTABLE — editing a
+/// published template creates a NEW version rather than mutating this row. That immutability
+/// is the whole contract behind client caching: a client that has downloaded
+/// (templateId=classic, version=3) never needs to re-check it.
+model TemplateVersion {
+  id         String                @id @default(uuid())
+  templateId String
+  /// Monotonic per template: 1, 2, 3… A new draft takes max(version)+1.
+  version    Int
+  status     TemplateVersionStatus @default(Draft)
+
+  /// The authored inputs, kept verbatim so a version can be re-opened in the admin panel
+  /// and re-compiled if the compiler ever changes.
+  sourceHtml String @db.Text
+  sourceCss  String @db.Text
+
+  /// The Billanta Template JSON — the fully-resolved render tree the client downloads.
+  /// JSONB so it can be served directly without a re-serialize.
+  compiled Json
+
+  /// Which compiler produced `compiled`. Stamped on every compile so a client can detect a
+  /// tree it's too old to render (and the server can recompile old sources under a new
+  /// compiler). See templates/compile.
+  compilerVersion Int
+
+  /// sha256 of the canonical `compiled` JSON. Doubles as the HTTP ETag for
+  /// GET /templates/:id/compiled, so an unchanged version returns 304.
+  checksum String
+
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, version])
+  @@index([templateId, status])
+}
+
+/// Per-user defaults that pre-fill the new-invoice screen. Exactly one row per user.
+///
+/// This is where the running invoice number lives. `nextInvoiceNumber` is a suggestion the
+/// client may use offline; it is NOT the source of truth for uniqueness — that is the
+/// `@@unique([userId, invoiceNumber])` on Invoice in Phase 5. Two offline devices can
+/// legitimately pick the same next number, and the invoice-level constraint is what
+/// catches the collision at sync time.
+model Settings {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  // ISO 4217. Default INR — the primary market.
+  defaultCurrency   String   @default("INR")
+  // Stored as Decimal, like every tax rate in the app (never a float). Nullable: a seller
+  // who isn't tax-registered has no default rate.
+  defaultTaxPercent Decimal?
+
+  invoiceNumberPrefix String?
+  nextInvoiceNumber   Int?    @default(1)
+  defaultTemplateId   String?
+  defaultNotes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------------
+// Phase 5 — invoices
+// ---------------------------------------------------------------------------------
+
+enum InvoiceStatus {
+  Draft
+  Pending
+  Paid
+}
+
+enum DiscountType {
+  Flat // a fixed amount off (discountValue is in paise)
+  Percentage // a percentage off (discountValue is the percent, e.g. 12.5)
+}
+
+/// An invoice. Created offline on the device, so the `id` is CLIENT-SUPPLIED and all writes
+/// are idempotent by (userId, id). Money is stored as INTEGER PAISE in BigInt columns (never a
+/// float); the server always RECOMPUTES totals from the items via src/common/money.ts and
+/// stores its own result — client-sent totals are advisory.
+model Invoice {
+  id     String @id @default(uuid())
+  userId String
+
+  /// Optional live reference to the Customer. The invoice does NOT depend on it: the
+  /// customer's details are SNAPSHOTTED below at issue time, so editing (or deleting) the
+  /// customer later never changes a historical invoice.
+  customerId String?
+
+  /// Denormalised snapshots of the buyer and seller AS THEY WERE when the invoice was issued.
+  /// These — not the live Company/Customer rows — are what the template renders against, so an
+  /// invoice is immutable history. JSON because their shape mirrors the client's snapshot.
+  customerSnapshot Json?
+  companySnapshot  Json?
+
+  invoiceNumber String
+  invoiceDate   DateTime
+  dueDate       DateTime?
+  /// ISO 4217. Default INR.
+  currency      String        @default("INR")
+  status        InvoiceStatus @default(Draft)
+
+  /// Which template + exact version this invoice was built with, so it re-renders identically
+  /// forever even after the template gets new versions.
+  templateId      String
+  templateVersion Int
+
+  notes String?
+
+  // --- discount input (what the user chose) ---
+  discountType      DiscountType?
+  /// The raw discount input: the percent for Percentage, or the amount in PAISE for Flat.
+  discountValue     Decimal?
+  /// Whether the discount is applied BEFORE tax (GST-correct, pro-rata across lines) or AFTER
+  /// tax (off the grand total). Togglable per invoice. See src/common/money.ts.
+  discountBeforeTax Boolean       @default(true)
+
+  // --- computed totals (server-authoritative, integer paise) ---
+  subtotal      BigInt
+  discountTotal BigInt @default(0)
+  taxTotal      BigInt
+  grandTotal    BigInt
+
+  /// Client-local path to the generated PDF. Opaque to the server (it never makes PDFs).
+  pdfPath String?
+
+  /// Soft delete for sync — a deleted invoice becomes a tombstone that propagates to other
+  /// devices via /invoices/sync rather than vanishing.
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  /// CLIENT-CONTROLLED, deliberately NOT `@updatedAt`. This is the device's edit time, and it
+  /// is both the last-write-wins key and the `/invoices/sync` pull cursor. Prisma-managed
+  /// server timestamps would compare two different clocks across devices and break LWW; the
+  /// server stores whatever the client sends (falling back to now() when absent). Cross-device
+  /// clock skew is the accepted limitation of LWW — documented in docs/API.md.
+  updatedAt DateTime @default(now())
+
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items InvoiceItem[]
+
+  // Two offline devices can pick the same next number; this per-user unique is what catches
+  // the collision at sync time (Settings.nextInvoiceNumber is only a suggestion).
+  @@unique([userId, invoiceNumber])
+  @@index([userId, updatedAt])
+  @@index([userId, status])
+  @@index([userId, invoiceNumber])
+}
+
+/// A line on an invoice. Money columns are integer paise (BigInt). `taxAmount` and `lineTotal`
+/// are the server's recomputed values, never trusted from the client.
+model InvoiceItem {
+  id        String @id @default(uuid())
+  invoiceId String
+
+  /// Stable ordering within the invoice (the client controls display order).
+  position    Int
+  description String
+  hsnSac      String?
+
+  quantity       Decimal
+  /// Per-unit price in paise.
+  unitPrice      BigInt
+  taxRatePercent Decimal @default(0)
+
+  /// Recomputed: the line's tax in paise (on the post-discount taxable value when the invoice
+  /// discounts before tax).
+  taxAmount BigInt
+  /// Recomputed: the extended line amount in paise (quantity × unitPrice, pre-discount/pre-tax).
+  lineTotal BigInt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
