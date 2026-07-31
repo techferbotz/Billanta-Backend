@@ -114,11 +114,15 @@ export class InvoiceService {
       if (stamp && stamp.updatedAt.getTime() >= push.data.updatedAt.getTime()) {
         continue;
       }
-      const { data, items } = this.build(push);
+      // build() (recompute) can itself throw a BadRequestError — e.g. the aggregate-overflow
+      // guard on a pathological invoice. It MUST be inside the try so one bad invoice becomes a
+      // per-item conflict rather than aborting the whole batch (which would permanently wedge the
+      // device: it re-pushes the same batch, re-throws, and never drains its other changes).
       try {
+        const { data, items } = this.build(push);
         await invoiceRepository.upsertOwn(userId, id, data, items);
       } catch (err) {
-        if (err instanceof ConflictError) {
+        if (err instanceof ConflictError || err instanceof BadRequestError) {
           conflicts.push({ id, reason: err.message });
         } else {
           throw err;

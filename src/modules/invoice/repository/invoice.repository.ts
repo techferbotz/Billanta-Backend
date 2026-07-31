@@ -187,11 +187,15 @@ export class InvoiceRepository {
     return prisma.$transaction(async (tx) => {
       const existing = await tx.invoice.findFirst({
         where: { id, userId },
-        select: { id: true, deletedAt: true },
+        select: { id: true, deletedAt: true, updatedAt: true },
       });
       if (!existing) return false;
       if (existing.deletedAt === null) {
-        await tx.invoice.update({ where: { id }, data: { deletedAt: when, updatedAt: when } });
+        // Keep updatedAt MONOTONIC — never below the row's current value — so the tombstone can't
+        // sink beneath a sync cursor already handed to another device (which would hide the
+        // deletion from it forever). `deletedAt` records the actual delete time.
+        const updatedAt = when.getTime() > existing.updatedAt.getTime() ? when : existing.updatedAt;
+        await tx.invoice.update({ where: { id }, data: { deletedAt: when, updatedAt } });
       }
       return true;
     });

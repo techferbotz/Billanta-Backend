@@ -146,6 +146,36 @@ const main = async (): Promise<void> => {
     const fullPull = await call(tA, "POST", "/invoices/sync", { invoices: [], since: null });
     ok("tombstone (deleted ID1) is in the sync pull", data(fullPull).changed.some((i: any) => i.id === ID1 && i.deletedAt !== null));
 
+    console.log("\nreview-fix regressions (completion review)");
+    // (1) A pathological (overflowing) invoice must NOT abort the batch — it's a per-item conflict,
+    //     and the valid invoice alongside it still applies.
+    const OVER = "aaaaaaaa-0000-4000-8000-000000000020";
+    const GOOD = "aaaaaaaa-0000-4000-8000-000000000021";
+    const overflowItems = [{ description: "huge", quantity: "10000000000000000", unitPrice: "1", taxRatePercent: "0" }];
+    const s3 = await call(tA, "POST", "/invoices/sync", {
+      invoices: [
+        invoicePayload(OVER, "OVR-1", { updatedAt: new Date().toISOString(), items: overflowItems }),
+        invoicePayload(GOOD, "GOOD-1", { updatedAt: new Date().toISOString() }),
+      ],
+      since: null,
+    });
+    ok("overflow invoice -> per-item conflict (batch NOT aborted, HTTP 200)", s3.status === 200 && data(s3).conflicts.some((c: any) => c.id === OVER));
+    ok("valid invoice in same batch still applied", (await call(tA, "GET", `/invoices/${GOOD}`)).status === 200);
+
+    // (2) PATCH { status: null } must NOT downgrade a Paid invoice to Draft.
+    await call(tA, "PATCH", `/invoices/${GOOD}`, { status: "Paid" });
+    const afterNull = await call(tA, "PATCH", `/invoices/${GOOD}`, { status: null, notes: "paid via upi" });
+    ok("PATCH status:null leaves status unchanged (still Paid, not Draft)", data(afterNull).status === "Paid" && data(afterNull).notes === "paid via upi");
+
+    // (3) DELETE stamps the tombstone with a MONOTONIC updatedAt (never below the row's current
+    //     value), even when the client sends an older delete time.
+    const beforeDel = data(await call(tA, "GET", `/invoices/${GOOD}`));
+    await call(tA, "DELETE", `/invoices/${GOOD}`, { updatedAt: older }); // older < the row's updatedAt
+    const delPull = await call(tA, "POST", "/invoices/sync", { invoices: [], since: null });
+    const goodTomb = data(delPull).changed.find((i: any) => i.id === GOOD);
+    ok("delete tombstone present with deletedAt", goodTomb && goodTomb.deletedAt !== null);
+    ok("tombstone updatedAt is monotonic (>= prior), not sunk to the older client time", goodTomb && new Date(goodTomb.updatedAt).getTime() >= new Date(beforeDel.updatedAt).getTime());
+
     // cleanup
     await prisma.user.deleteMany({ where: { id: { in: [A.id, B.id] } } });
     await prisma.$disconnect();

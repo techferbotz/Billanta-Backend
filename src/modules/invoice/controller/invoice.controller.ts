@@ -6,7 +6,7 @@ import { parsePagination } from "../../../common/pagination";
 import { AppError } from "../../../common/errors/AppError";
 import { optionalUuid, requireObjectBody } from "../../../common/validation";
 import { invoiceService, InvoiceStatusFilter } from "../service/invoice.service";
-import { parseInvoiceInput, parseInvoicePatch, ParsedInvoiceInput } from "../dto/invoice.dto";
+import { parseInvoiceInput, parseInvoicePatch, parseDeleteTime, ParsedInvoiceInput } from "../dto/invoice.dto";
 import { decodeSyncCursor } from "../syncCursor";
 
 const parseStatusFilter = (raw: unknown): InvoiceStatusFilter | undefined => {
@@ -46,9 +46,15 @@ export const patchInvoice = async (req: Request<{ id: string }>, res: Response):
   sendSuccess(res, await invoiceService.patch(userId, req.params.id, patch));
 };
 
-// DELETE /invoices/:id — soft delete (a tombstone that syncs to other devices).
+// DELETE /invoices/:id — soft delete (a tombstone that syncs to other devices). Accepts an
+// optional { updatedAt } (the client's delete time) so the tombstone stays in the client clock
+// domain; falls back to now(). A DELETE body is optional, so an empty/absent body is fine.
 export const deleteInvoice = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
-  await invoiceService.delete(getUserId(req), req.params.id, new Date());
+  const body =
+    typeof req.body === "object" && req.body !== null && !Array.isArray(req.body)
+      ? (req.body as Record<string, unknown>)
+      : {};
+  await invoiceService.delete(getUserId(req), req.params.id, parseDeleteTime(body));
   sendSuccess(res);
 };
 

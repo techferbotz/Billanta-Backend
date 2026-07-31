@@ -210,7 +210,10 @@ export const parseInvoicePatch = (body: Record<string, unknown>): InvoicePatch =
   const patch: InvoicePatch = {
     updatedAt: body.updatedAt ? parseDate(body.updatedAt, "updatedAt") : new Date(),
   };
-  if ("status" in body) patch.status = parseStatus(body.status);
+  // For PATCH, treat an explicit null the same as absent (leave unchanged). Without this,
+  // parseStatus(null) coerces to Draft, so a client library that serializes an unset field as
+  // `"status": null` (common on Android) would silently downgrade a Paid invoice to Draft.
+  if ("status" in body && body.status !== null) patch.status = parseStatus(body.status);
   if ("notes" in body) patch.notes = optionalString(body.notes, "notes", 5000) ?? null;
   if ("dueDate" in body) patch.dueDate = parseOptionalDate(body.dueDate, "dueDate");
   if ("pdfPath" in body) patch.pdfPath = optionalString(body.pdfPath, "pdfPath", 1000) ?? null;
@@ -219,6 +222,15 @@ export const parseInvoicePatch = (body: Record<string, unknown>): InvoicePatch =
   if ("currency" in body) patch.currency = optionalCurrency(body.currency, "currency");
   return patch;
 };
+
+/**
+ * The deletion time for DELETE /invoices/:id — the client's edit-time when supplied (so the
+ * tombstone's updatedAt stays in the same client clock domain as edits and the sync cursor),
+ * else now(). The soft-delete then keeps updatedAt monotonic so the tombstone can't sink below a
+ * sync cursor already issued to another device.
+ */
+export const parseDeleteTime = (body: Record<string, unknown>): Date =>
+  body.updatedAt ? parseDate(body.updatedAt, "updatedAt") : new Date();
 
 // ---- output mapping ----------------------------------------------------------------
 

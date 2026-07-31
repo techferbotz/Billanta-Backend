@@ -375,7 +375,8 @@ model Invoice {
   @@unique([userId, invoiceNumber])
   @@index([userId, updatedAt])
   @@index([userId, status])
-  @@index([userId, invoiceNumber])
+  // NOTE: no explicit @@index([userId, invoiceNumber]) — the @@unique above already creates a
+  // btree index on exactly those columns, which the planner uses for the number lookup.
 }
 
 /// A line on an invoice. Money columns are integer paise (BigInt). `taxAmount` and `lineTotal`
