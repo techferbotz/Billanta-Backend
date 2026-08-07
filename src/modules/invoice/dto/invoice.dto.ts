@@ -73,6 +73,39 @@ const parseSnapshot = (value: unknown, field: string): Prisma.InputJsonValue | u
   return value as Prisma.InputJsonValue;
 };
 
+// themeOverrides: an opaque JSON object mapping a template theme-token name to a hex colour. The
+// server validates only "is an object" plus a small size cap — the colours and token names are
+// entirely the app's concern (APP-003). Absent/null => undefined (stored as JSON null = "use the
+// template's default colours").
+const MAX_THEME_BYTES = 2 * 1024;
+const parseThemeOverrides = (value: unknown, field: string): Prisma.InputJsonValue | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new BadRequestError(`"${field}" must be a JSON object`);
+  }
+  if (JSON.stringify(value).length > MAX_THEME_BYTES) {
+    throw new BadRequestError(`"${field}" is too large`);
+  }
+  return value as Prisma.InputJsonValue;
+};
+
+// hiddenSections: an array of short section-id strings the app wants hidden. Validated as an array
+// of ≤64-char strings with a count cap; the ids' meaning is the app's. Absent/null => undefined.
+const MAX_HIDDEN_SECTIONS = 50;
+const parseHiddenSections = (value: unknown, field: string): Prisma.InputJsonValue | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new BadRequestError(`"${field}" must be an array of strings`);
+  if (value.length > MAX_HIDDEN_SECTIONS) {
+    throw new BadRequestError(`"${field}" has too many entries`);
+  }
+  value.forEach((v, i) => {
+    if (typeof v !== "string" || v.length > 64) {
+      throw new BadRequestError(`"${field}[${i}]" must be a string of at most 64 characters`);
+    }
+  });
+  return value as Prisma.InputJsonValue;
+};
+
 // ---- parsed input types ------------------------------------------------------------
 
 export interface ParsedInvoiceItem {
@@ -103,6 +136,8 @@ export interface ParsedInvoiceInput {
     discountBeforeTax: boolean;
     updatedAt: Date;
     deletedAt: Date | null;
+    themeOverrides: Prisma.InputJsonValue | undefined;
+    hiddenSections: Prisma.InputJsonValue | undefined;
   };
   items: ParsedInvoiceItem[];
   // Derived inputs to the money module.
@@ -178,6 +213,8 @@ export const parseInvoiceInput = (
       // Client-controlled edit time (LWW key). Falls back to now() when the client omits it.
       updatedAt: body.updatedAt ? parseDate(body.updatedAt, "updatedAt") : new Date(),
       deletedAt: parseOptionalDate(body.deletedAt, "deletedAt"),
+      themeOverrides: parseThemeOverrides(body.themeOverrides, "themeOverrides"),
+      hiddenSections: parseHiddenSections(body.hiddenSections, "hiddenSections"),
     },
     items,
     moneyItems: money,
@@ -269,6 +306,9 @@ export interface InvoiceDto {
   templateId: string;
   templateVersion: number;
   notes: string | null;
+  // Template customisation, echoed verbatim (opaque to the server). Null = template defaults.
+  themeOverrides: Prisma.JsonValue | null;
+  hiddenSections: Prisma.JsonValue | null;
   discountType: DiscountType | null;
   discountValue: string | null;
   discountBeforeTax: boolean;
@@ -321,6 +361,8 @@ export const toInvoiceDto = (inv: InvoiceWithItems): InvoiceDto => {
     templateId: inv.templateId,
     templateVersion: inv.templateVersion,
     notes: inv.notes,
+    themeOverrides: inv.themeOverrides,
+    hiddenSections: inv.hiddenSections,
     discountType: inv.discountType,
     discountValue: inv.discountValue ? inv.discountValue.toString() : null,
     discountBeforeTax: inv.discountBeforeTax,

@@ -41,6 +41,8 @@ capabilities — new node types, new style properties — by publishing a new te
 - `page.size` is `"A4"` for V1 (the field exists so more can be added compatibly).
 - `page.margin` is in **points**, derived from the root element's padding (default 36pt ≈ 0.5in).
 - `page.fontFamily` / `page.baseFontSize` (points) are the document defaults.
+- `theme` and `sections` (both **optional**) — the template-customisation layer, present only when
+  the template declares colour tokens / tags named sections. See "Template customisation" below.
 
 ## Units, colors, values
 
@@ -123,6 +125,72 @@ Every node has `type` and `style`.
 `columns` gives each column a `width` (points, or `"auto"` to size to content), expanded for
 `colSpan`. When a `repeat`/`conditional` wraps an element that also has the other, the
 `conditional` is outermost (gate, then repeat).
+
+Additionally, **any node may carry two optional keys** — `section` (a string id) and `tokens` (a
+style-key → token-name map) — for the customisation layer described next. They appear only on tagged
+nodes; a renderer that ignores them draws exactly as before.
+
+## Template customisation — colour tokens + named sections (optional)
+
+Two optional, additive layers let the app **recolour** a template and **hide blocks** at render
+time, with no bespoke server compile and no change to `(templateId, version)` immutability. Both
+obey the forward-compatibility rule: a template that omits them is unchanged, and a renderer that
+ignores them renders exactly as today.
+
+### Colour tokens
+
+Document-level `theme` (present only when the template declares tokens):
+
+```json
+"theme": {
+  "tokens": {
+    "accent": { "default": "#2b3648", "label": "Accent" }
+  }
+}
+```
+
+Each token is a named colour the user may override: `default` is the template's own hex (the same
+value already in `style`); `label` is a human name for the colour picker. `accent` is the one users
+most often change; a template may also declare `ink`, `muted`, etc.
+
+Any node whose style uses a token also carries a `tokens` map from **style key → token name**, while
+`style` keeps the literal hex:
+
+```json
+{ "type": "cell",
+  "style":  { "backgroundColor": "#2b3648", "color": "#ffffff" },
+  "tokens": { "backgroundColor": "accent" } }
+```
+
+`style` stays authoritative — a renderer that knows nothing about `tokens` draws the literal colour.
+A renderer that does: wherever a node names a token for a style key, substitute the user's chosen
+colour (from the invoice's `themeOverrides`) for that key, falling back to the token's `default`.
+
+### Named sections
+
+Document-level `sections` tags the top-level blocks so the app can build show/hide toggles with real
+labels:
+
+```json
+"sections": [
+  { "id": "header",  "label": "Header",          "hidable": false },
+  { "id": "items",   "label": "Item table",      "hidable": false },
+  { "id": "payment", "label": "Payment details", "hidable": true },
+  { "id": "notes",   "label": "Notes",           "hidable": true }
+]
+```
+
+and the corresponding node carries `"section": "payment"`. `hidable: false` marks blocks that must
+always render (header, bill-to, items, totals). The app hides a block whose id is in the invoice's
+`hiddenSections`. An unknown `section` id is ignored, so the vocabulary can grow. Known ids:
+`header, parties, items, totals, payment, notes, signature, terms`.
+
+### Where the user's choice is stored
+
+The per-invoice customisation lives on the **invoice**, not the template — so it survives re-render
+and syncs across devices: `themeOverrides` (`{ tokenName: "#hex" }`) and `hiddenSections`
+(`["sectionId", …]`). See [API.md](API.md) § Invoices. A missing value means "template defaults".
+Not every template declares tokens/sections; the app's controls simply appear when one does.
 
 ## Binding namespace
 

@@ -26,7 +26,7 @@ const CLASSIC: SeedTemplate = {
   isPremium: false,
   html: `
 <div class="page" data-page-size="A4">
-  <div class="top">
+  <div class="top" data-section="header">
     <div class="brand">
       <img class="logo" src="{{ company.logo }}" />
       <div>
@@ -37,27 +37,27 @@ const CLASSIC: SeedTemplate = {
       </div>
     </div>
     <div class="meta">
-      <div class="title">INVOICE</div>
+      <div class="title" data-token="color:accent">INVOICE</div>
       <div class="muted">No. {{ invoice.number }}</div>
       <div class="muted">Date: {{ invoice.date | date }}</div>
       <div class="muted" data-if="invoice.dueDate">Due: {{ invoice.dueDate | date }}</div>
     </div>
   </div>
 
-  <div class="billto">
+  <div class="billto" data-section="parties">
     <div class="label">Bill To</div>
     <div class="cname">{{ customer.name }}</div>
     <div class="muted">{{ customer.addressLine1 }}</div>
     <div class="muted" data-if="customer.gstin">GSTIN: {{ customer.gstin }}</div>
   </div>
 
-  <table class="items">
+  <table class="items" data-section="items">
     <thead>
       <tr>
-        <th class="desc">Description</th>
-        <th class="num">Qty</th>
-        <th class="num">Rate</th>
-        <th class="num">Amount</th>
+        <th class="desc" data-token="backgroundColor:accent">Description</th>
+        <th class="num" data-token="backgroundColor:accent">Qty</th>
+        <th class="num" data-token="backgroundColor:accent">Rate</th>
+        <th class="num" data-token="backgroundColor:accent">Amount</th>
       </tr>
     </thead>
     <tbody>
@@ -75,13 +75,13 @@ const CLASSIC: SeedTemplate = {
     </tfoot>
   </table>
 
-  <div class="pay" data-if="payment.upi">
+  <div class="pay" data-section="payment" data-if="payment.upi">
     <div class="label">Payment</div>
     <div class="muted">UPI: {{ payment.upi }}</div>
     <div class="muted" data-if="payment.bankName">Bank: {{ payment.bankName }} · A/C {{ payment.accountNumber }} · IFSC {{ payment.ifsc }}</div>
   </div>
 
-  <div class="notes" data-if="invoice.notes">{{ invoice.notes }}</div>
+  <div class="notes" data-section="notes" data-if="invoice.notes">{{ invoice.notes }}</div>
 </div>`,
   css: `
 .page { padding: 44px; font-family: Inter; font-size: 10pt; color: #1f2430; line-height: 1.45; }
@@ -95,7 +95,7 @@ const CLASSIC: SeedTemplate = {
 .billto { margin-top: 22px; }
 .label { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #97a0b0; }
 .items { width: 100%; margin-top: 18px; }
-.items th { background: #2b3648; color: #ffffff; text-align: left; padding: 8px 10px; font-size: 9pt; }
+.items th { background-color: #2b3648; color: #ffffff; text-align: left; padding: 8px 10px; font-size: 9pt; }
 .items th.num { text-align: right; }
 .items td { padding: 7px 10px; border-bottom: 1px solid #e7eaf0; }
 .items td.num { text-align: right; }
@@ -114,11 +114,11 @@ const MINIMAL: SeedTemplate = {
   isPremium: false,
   html: `
 <div class="page" data-page-size="A4">
-  <div class="head">
-    <div class="title">Invoice</div>
+  <div class="head" data-section="header">
+    <div class="title" data-token="color:accent">Invoice</div>
     <div class="no">{{ invoice.number }}</div>
   </div>
-  <div class="row">
+  <div class="row" data-section="parties">
     <div>
       <div class="k">From</div>
       <div class="v">{{ company.name }}</div>
@@ -135,7 +135,7 @@ const MINIMAL: SeedTemplate = {
     </div>
   </div>
 
-  <table class="items">
+  <table class="items" data-section="items">
     <thead>
       <tr><th class="desc">Item</th><th class="num">Qty</th><th class="num">Amount</th></tr>
     </thead>
@@ -148,7 +148,7 @@ const MINIMAL: SeedTemplate = {
     </tbody>
   </table>
 
-  <div class="total">
+  <div class="total" data-section="totals">
     <span class="k">Total due</span>
     <span class="amt">{{ invoice.total | currency }}</span>
   </div>
@@ -182,12 +182,12 @@ const BOLD: SeedTemplate = {
   isPremium: true,
   html: `
 <div class="page" data-page-size="A4">
-  <div class="banner">
+  <div class="banner" data-section="header" data-token="backgroundColor:accent">
     <div class="bname">{{ company.name }}</div>
     <div class="binvoice">INVOICE #{{ invoice.number }}</div>
   </div>
   <div class="body">
-    <div class="parties">
+    <div class="parties" data-section="parties">
       <div>
         <div class="k">Billed to</div>
         <div class="v">{{ customer.name }}</div>
@@ -199,9 +199,9 @@ const BOLD: SeedTemplate = {
       </div>
     </div>
 
-    <table class="items">
+    <table class="items" data-section="items">
       <thead>
-        <tr><th>Description</th><th class="num">Qty</th><th class="num">Amount</th></tr>
+        <tr><th data-token="color:accent">Description</th><th class="num" data-token="color:accent">Qty</th><th class="num" data-token="color:accent">Amount</th></tr>
       </thead>
       <tbody>
         <tr data-repeat="items as item">
@@ -212,7 +212,7 @@ const BOLD: SeedTemplate = {
       </tbody>
     </table>
 
-    <div class="summary">
+    <div class="summary" data-section="totals">
       <div class="line"><span>Subtotal</span><span>{{ invoice.subtotal | currency }}</span></div>
       <div class="line"><span>Tax</span><span>{{ invoice.tax | currency }}</span></div>
       <div class="line grand"><span>Total</span><span>{{ invoice.total | currency }}</span></div>

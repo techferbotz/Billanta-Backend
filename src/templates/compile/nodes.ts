@@ -58,38 +58,48 @@ export interface Span {
 }
 
 // --- Nodes -------------------------------------------------------------------------
-export interface BoxNode {
+
+// Optional template-customisation tags (APP-003), present only when the author tagged the element.
+// `section` names a top-level block the app may show/hide; `tokens` maps a resolved style key to a
+// theme-token name so the app can recolour it while `style` keeps the literal default hex. An older
+// renderer, knowing neither key, ignores both and renders exactly as before.
+export interface Tagged {
+  section?: string;
+  tokens?: Record<string, string>;
+}
+
+export interface BoxNode extends Tagged {
   type: "box";
   style: ResolvedStyle;
   children: TemplateNode[];
 }
 
-export interface TextNode {
+export interface TextNode extends Tagged {
   type: "text";
   style: ResolvedStyle;
   spans: Span[];
 }
 
-export interface ImageNode {
+export interface ImageNode extends Tagged {
   type: "image";
   style: ResolvedStyle;
   source: Value; // always a binding in practice — external URLs are rejected at compile time
   fit: "contain" | "cover";
 }
 
-export interface DividerNode {
+export interface DividerNode extends Tagged {
   type: "divider";
   style: ResolvedStyle;
 }
 
-export interface CellNode {
+export interface CellNode extends Tagged {
   type: "cell";
   style: ResolvedStyle;
   colSpan: number;
   children: TemplateNode[];
 }
 
-export interface RowNode {
+export interface RowNode extends Tagged {
   type: "row";
   style: ResolvedStyle;
   cells: CellNode[];
@@ -116,7 +126,7 @@ export interface TableBody {
   rows?: RowNode[]; // static rows, when the tbody has no data-repeat
 }
 
-export interface TableNode {
+export interface TableNode extends Tagged {
   type: "table";
   style: ResolvedStyle;
   columns: TableColumn[];
@@ -166,10 +176,34 @@ export interface PageSetup {
   baseFontSize: number; // points
 }
 
+// A named colour a template exposes for the app to override. `default` is the template's own hex
+// (the same value `style` already carries); `label` is a human name for the app's colour picker.
+export interface ThemeToken {
+  default: string;
+  label: string;
+}
+
+export interface Theme {
+  tokens: Record<string, ThemeToken>;
+}
+
+// A top-level block the app can build a show/hide toggle for. `hidable: false` marks blocks that
+// must always render (header, bill-to, items, totals); `true` marks the optional ones (payment,
+// notes, signature, terms). An unknown id is simply ignored by the app.
+export interface SectionDef {
+  id: string;
+  label: string;
+  hidable: boolean;
+}
+
 // The whole compiled document — exactly what GET /templates/:id/compiled returns.
 export interface CompiledTemplate {
   schemaVersion: number;
   compilerVersion: number;
   page: PageSetup;
+  // Present only when the template declares colour tokens / tags named sections (APP-003). Absent
+  // (not empty) when it does not, so an untagged template's bytes are unchanged.
+  theme?: Theme;
+  sections?: SectionDef[];
   root: TemplateNode;
 }

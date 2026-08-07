@@ -25,6 +25,8 @@ export interface InvoiceWriteData {
   templateId: string;
   templateVersion: number;
   notes: string | null;
+  themeOverrides: Prisma.InputJsonValue | undefined;
+  hiddenSections: Prisma.InputJsonValue | undefined;
   discountType: Prisma.InvoiceCreateInput["discountType"];
   discountValue: string | null;
   discountBeforeTax: boolean;
@@ -60,6 +62,10 @@ const toPrismaData = (data: InvoiceWriteData) => ({
   templateId: data.templateId,
   templateVersion: data.templateVersion,
   notes: data.notes,
+  // Absent (undefined) => JSON null, so a re-POST that omits customisation fully clears it rather
+  // than leaving a stale value — the same coercion the customer/company snapshots use.
+  themeOverrides: data.themeOverrides ?? Prisma.JsonNull,
+  hiddenSections: data.hiddenSections ?? Prisma.JsonNull,
   discountType: data.discountType,
   discountValue: data.discountValue,
   discountBeforeTax: data.discountBeforeTax,

@@ -38,6 +38,26 @@ is to emit a render tree so simple and fully-resolved (cascade applied, inherita
 in points, bindings extracted) that the client renderer is "dumb". See
 [`docs/TEMPLATE_JSON.md`](docs/TEMPLATE_JSON.md).
 
+## Cross-side contract folder (app ↔ backend channel)
+
+Billanta is built across two laptops — this one (Node/TS **backend**) and another (Kotlin
+Multiplatform **app**). Cross-side requirements travel through a Google-Drive-synced folder, **not**
+by copying files around or opening the other repo.
+
+- **Path (this laptop):** `G:\My Drive\Billanta\Billanta-Contract`
+  (app laptop, macOS: `~/Library/CloudStorage/GoogleDrive-techferbotz@gmail.com/My Drive/Billanta/Billanta-Contract`).
+- **Read `README.md` there first — it is the authoritative protocol.** In brief: the backend writes
+  ONLY inside `backend/`, the app writes ONLY inside `app/`, and each side's `applied.md` is a
+  watermark recording how far it has consumed the other's log.
+- **To handle app requests:** implement every `app/REQUESTS.md` entry newer than the watermark in
+  `backend/applied.md`; update the reference docs in `backend/` (`API.md`, `TEMPLATE_JSON.md`,
+  `MONEY.md` — the app is written against *those* files); append a `BE-nnn` entry to
+  `backend/CHANGELOG.md` for anything the app must react to; then move `backend/applied.md`.
+- **Two hard rules:** never read or clone the app's repository (everything needed is in the folder),
+  and never paste implementation code into the folder — describe the *contract*, not how it's built.
+- The `backend/` docs there are the curated copy the app builds against; `docs/` in THIS repo is the
+  internal copy — keep both honest when the API changes.
+
 ## Tech stack
 
 | Concern | Choice |

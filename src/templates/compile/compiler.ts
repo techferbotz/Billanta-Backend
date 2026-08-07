@@ -17,6 +17,9 @@ import {
   Span,
   PageMargin,
   PageSetup,
+  Theme,
+  ThemeToken,
+  SectionDef,
 } from "./nodes";
 import { failAt, CompileError, ValueError } from "./errors";
 import { AuthoredElement, AuthoredNode, parseHtml } from "../html/parser";
@@ -58,6 +61,31 @@ const DEFAULT_FONT_SIZE = 11; // pt
 // so an attacker-controlled colspan can never cause an OOM/hang.
 const MAX_COLSPAN = 64;
 
+// The canonical section vocabulary (APP-003): stable id -> human label + whether the app may hide
+// the block. An author tags a top-level block with data-section="<id>" and the compiler emits the
+// matching entry. An id outside this list still works (emitted with a derived label, hidable), so
+// the vocabulary can grow without a compiler change.
+const SECTION_VOCAB: { id: string; label: string; hidable: boolean }[] = [
+  { id: "header", label: "Header", hidable: false },
+  { id: "parties", label: "Bill to", hidable: false },
+  { id: "items", label: "Item table", hidable: false },
+  { id: "totals", label: "Totals", hidable: false },
+  { id: "payment", label: "Payment details", hidable: true },
+  { id: "notes", label: "Notes", hidable: true },
+  { id: "signature", label: "Signature", hidable: true },
+  { id: "terms", label: "Terms", hidable: true },
+];
+
+// Human labels for the colour tokens users recognise; any other token name gets a capitalised
+// fallback so an author can invent a token without editing the compiler.
+const TOKEN_LABELS: Record<string, string> = {
+  accent: "Accent",
+  ink: "Text",
+  muted: "Secondary text",
+};
+
+const capitalize = (s: string): string => (s.length ? s[0].toUpperCase() + s.slice(1) : s);
+
 export interface CompileResult {
   compiled: CompiledTemplate;
   checksum: string;
@@ -68,6 +96,10 @@ export interface CompileResult {
 // can stay a set of small methods.
 class Compiler {
   private readonly styles: Map<AuthoredElement, ResolvedStyle>;
+  // Template-customisation collectors, filled by tagNode during the tree walk (APP-003). A Map and
+  // a Set both preserve first-occurrence order, so buildTheme/buildSections stay deterministic.
+  private readonly themeTokens = new Map<string, string>(); // token name -> default hex
+  private readonly sectionsUsed = new Set<string>();
 
   constructor(private readonly root: AuthoredElement, rules: ReturnType<typeof parseCss>) {
     this.styles = resolveStyles(root, rules);
@@ -177,6 +209,9 @@ class Compiler {
     const ifAttr = el.attrs.get("data-if");
 
     let node = this.compileElement(el, insideRepeat || repeatAttr !== undefined);
+    // Attach data-section / data-token to the element's OWN node, before any repeat/conditional
+    // wrapper (which carries no style or tags). [APP-003]
+    if ("style" in node) this.tagNode(node, el);
 
     if (repeatAttr !== undefined) {
       const rb = this.parseRepeat(repeatAttr, el.line);
@@ -341,7 +376,9 @@ class Compiler {
       }
       cells.push(this.compileCell(child, insideRepeat));
     }
-    return { type: "row", style, cells };
+    const node: RowNode = { type: "row", style, cells };
+    this.tagNode(node, tr);
+    return node;
   }
 
   private compileCell(cell: AuthoredElement, insideRepeat: boolean): CellNode {
@@ -350,7 +387,9 @@ class Compiler {
     const children = this.hasBlockChild(cell)
       ? this.compileBlockChildren(cell, insideRepeat)
       : this.childrenOfText(cell);
-    return { type: "cell", style, colSpan, children };
+    const node: CellNode = { type: "cell", style, colSpan, children };
+    this.tagNode(node, cell); // a table header cell is the canonical data-token="backgroundColor:accent" site
+    return node;
   }
 
   private childrenOfText(el: AuthoredElement): TemplateNode[] {
@@ -407,6 +446,85 @@ class Compiler {
     }
   }
 
+  // --- template customisation: colour tokens + named sections (APP-003) -------------
+  // Attach an element's data-section / data-token tags to its compiled node, and register them so
+  // the document-level `theme` and `sections` can be assembled once the walk finishes.
+  private tagNode(
+    node: { style: ResolvedStyle; section?: string; tokens?: Record<string, string> },
+    el: AuthoredElement
+  ): void {
+    const sectionAttr = el.attrs.get("data-section");
+    if (sectionAttr !== undefined) {
+      const id = sectionAttr.trim();
+      if (id.length) {
+        node.section = id;
+        this.sectionsUsed.add(id);
+      }
+    }
+    const tokenAttr = el.attrs.get("data-token");
+    if (tokenAttr !== undefined) {
+      const tokens = this.parseTokens(tokenAttr, node.style, el.line);
+      if (Object.keys(tokens).length) node.tokens = tokens;
+    }
+  }
+
+  // Parse `data-token="styleKey:tokenName …"`. Each pair names a token for one style key; the
+  // token's DEFAULT colour is read from the element's already-resolved `style` (which keeps the
+  // literal hex), so a token can only be declared on a colour the element actually has.
+  private parseTokens(raw: string, style: ResolvedStyle, line?: number): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const pair of raw.trim().split(/\s+/).filter(Boolean)) {
+      const idx = pair.indexOf(":");
+      if (idx <= 0 || idx === pair.length - 1) {
+        failAt("structure", `invalid data-token "${pair}" (expected "styleKey:tokenName")`, line);
+      }
+      const styleKey = pair.slice(0, idx);
+      const tokenName = pair.slice(idx + 1);
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(tokenName)) {
+        failAt("structure", `invalid theme token name "${tokenName}"`, line);
+      }
+      const hex = style[styleKey];
+      if (typeof hex !== "string") {
+        failAt("structure", `data-token "${pair}": the element has no resolved "${styleKey}" colour to tokenise`, line);
+        continue; // unreachable (failAt throws); lets TS narrow hex to string below
+      }
+      out[styleKey] = tokenName;
+      // First occurrence in the (deterministic) tree walk fixes the token's default colour.
+      if (!this.themeTokens.has(tokenName)) this.themeTokens.set(tokenName, hex);
+    }
+    // Emit style keys in a fixed (sorted) order for byte-identical output regardless of author order.
+    const ordered: Record<string, string> = {};
+    for (const key of Object.keys(out).sort()) ordered[key] = out[key];
+    return ordered;
+  }
+
+  private buildTheme(): Theme | undefined {
+    if (this.themeTokens.size === 0) return undefined;
+    const tokens: Record<string, ThemeToken> = {};
+    for (const [name, def] of this.themeTokens) {
+      tokens[name] = { default: def, label: TOKEN_LABELS[name] ?? capitalize(name) };
+    }
+    return { tokens };
+  }
+
+  private buildSections(): SectionDef[] {
+    if (this.sectionsUsed.size === 0) return [];
+    const out: SectionDef[] = [];
+    // Canonical vocabulary first, in canonical order, for the ids the template actually used…
+    for (const def of SECTION_VOCAB) {
+      if (this.sectionsUsed.has(def.id)) {
+        out.push({ id: def.id, label: def.label, hidable: def.hidable });
+      }
+    }
+    // …then any id outside the vocabulary, in first-occurrence order, defaulting to hidable.
+    for (const id of this.sectionsUsed) {
+      if (!SECTION_VOCAB.some((d) => d.id === id)) {
+        out.push({ id, label: capitalize(id), hidable: true });
+      }
+    }
+    return out;
+  }
+
   // --- page setup -------------------------------------------------------------------
   private buildPage(rootStyle: ResolvedStyle): PageSetup {
     const sizeAttr = this.root.attrs.get("data-page-size");
@@ -434,12 +552,20 @@ class Compiler {
     // Compile the root as a box; strip its padding, which became the page margin (so it isn't
     // applied twice). The root itself is never a repeat/conditional target.
     const rootNode = this.compileElement(this.root, false) as BoxNode | TextNode;
+    this.tagNode(rootNode, this.root);
     stripPadding(rootNode.style);
+
+    // Assembled from what the tree walk collected; included only when non-empty so an untagged
+    // template's bytes (and checksum) are exactly as before. [APP-003]
+    const theme = this.buildTheme();
+    const sections = this.buildSections();
 
     const compiled: CompiledTemplate = {
       schemaVersion: SCHEMA_VERSION,
       compilerVersion: COMPILER_VERSION,
       page,
+      ...(theme ? { theme } : {}),
+      ...(sections.length ? { sections } : {}),
       root: rootNode,
     };
     const checksum = createHash("sha256").update(JSON.stringify(compiled)).digest("hex");

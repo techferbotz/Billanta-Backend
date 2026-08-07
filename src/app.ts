@@ -12,6 +12,7 @@ import mediaRoutes from "./modules/media/media.routes";
 import templateRoutes from "./modules/template/template.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import invoiceRoutes from "./modules/invoice/invoice.routes";
+import productRoutes from "./modules/product/product.routes";
 import legalRoutes from "./modules/legal/legal.routes";
 
 const app = express();
@@ -40,6 +41,7 @@ app.use("/settings", settingsRoutes); // invoice defaults (auth)
 app.use("/customers", customerRoutes); // customer CRUD + search (auth)
 app.use("/media", mediaRoutes); // image uploads -> S3 (auth)
 app.use("/invoices", invoiceRoutes); // invoice CRUD + sync (auth)
+app.use("/products", productRoutes); // reusable line-item catalogue (auth)
 app.use("/templates", templateRoutes); // public template browse + compiled download (optionalAuth)
 // Admin authoring API + panel. Authenticates with ADMIN_API_KEY (not a user JWT); GET /admin
 // and POST /admin/login are public and registered before the key check inside the router.

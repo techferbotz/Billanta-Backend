@@ -52,6 +52,7 @@ model User {
   customers     Customer[]
   settings      Settings?
   invoices      Invoice[]
+  products      Product[]
 }
 
 /// One issued refresh token. Access tokens are short-lived JWTs and are NOT stored;
@@ -338,6 +339,15 @@ model Invoice {
 
   notes String?
 
+  // --- template customisation (opaque to the server; the app applies it at render time) [APP-003] ---
+  /// Per-invoice colour overrides: a JSON object mapping a template theme-token name to a hex
+  /// colour, e.g. `{ "accent": "#c2410c" }`. Null = template defaults. Stored and echoed verbatim;
+  /// the server validates only "is an object" + a size cap, never the colours themselves.
+  themeOverrides Json?
+  /// Section ids the user chose to hide, e.g. `["signature","terms"]`. Null = template defaults.
+  /// Validated only as an array of short strings; meaning is entirely the app's.
+  hiddenSections Json?
+
   // --- discount input (what the user chose) ---
   discountType      DiscountType?
   /// The raw discount input: the percent for Percentage, or the amount in PAISE for Flat.
@@ -404,4 +414,39 @@ model InvoiceItem {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+}
+
+// ---------------------------------------------------------------------------------
+// Phase 7 — products (reusable line items)  [contract: APP-002]
+// ---------------------------------------------------------------------------------
+
+/// A reusable product/service the seller bills, so a line item's description, rate and tax rate
+/// don't have to be retyped. The app remembers a product the moment it's added to an invoice and
+/// offers it when adding the next one.
+///
+/// Deliberately the SAME shape and rules as Customer: the `id` is CLIENT-SUPPLIED and writes are
+/// idempotent by (userId, id). Products are HARD-deleted (no tombstone) and are NOT part of the
+/// last-write-wins sync cursor — there is no `/products/sync`; the app replays creates/updates
+/// per row, exactly as it does for customers.
+model Product {
+  id     String @id @default(uuid())
+  userId String
+
+  name           String
+  hsnSac         String?
+  /// Per-unit price in PAISE (integer, BigInt) — the same money representation as InvoiceItem.
+  unitPrice      BigInt  @default(0)
+  taxRatePercent Decimal @default(0)
+  /// Free-text unit ("hour", "page", "piece"). Display only for now.
+  unit           String?
+
+  createdAt DateTime @default(now())
+  /// Server-managed, exactly as Customer.updatedAt — products aren't in the LWW sync cursor, so
+  /// there's no client clock to preserve; the last write to reach the server wins.
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // `?q=` matches name; user-scoped so a search never crosses accounts.
+  @@index([userId, name])
 }

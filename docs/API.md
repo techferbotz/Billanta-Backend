@@ -15,7 +15,7 @@ Base URL: your deployment origin (e.g. `https://api.billanta.example`). All exam
   a string (`"531000"` = ₹5,310.00). Quantities and tax rates are decimal strings.
 - **Pagination.** List endpoints take `?limit` (1–100, default 20) and `?cursor`, and return
   `{ items, nextCursor, hasMore }`. Pass `nextCursor` back as `?cursor`.
-- **Client-generated ids.** Invoices and customers accept a client uuid `id`; writes are
+- **Client-generated ids.** Invoices, customers and products accept a client uuid `id`; writes are
   idempotent by `(userId, id)`.
 
 Common errors: `401` (missing/expired token), `404` (missing or not-yours), `409` (duplicate id or
@@ -97,6 +97,32 @@ Revokes the presented refresh token. Always `200` (silent about unknown tokens).
 - `GET /customers/:id` · `PATCH /customers/:id` (partial) · `DELETE /customers/:id` (hard delete).
   A foreign/missing id → `404`; a colliding id owned by someone else → `409`.
 
+## Products (auth)
+
+A reusable catalogue of line items, so a description/rate/tax needn't be retyped. **Same shape and
+rules as Customers** (client uuid `id`, idempotent by `(userId, id)`; a foreign/missing id → `404`,
+a colliding id owned by someone else → `409`). Money is paise strings, as everywhere. There is
+deliberately **no** `/products/sync` and **no** server-side dedup — the client replays per row and
+decides what "the same product" is (matching on a normalised name and reusing the id).
+
+```json
+// POST /products  (201) — client may supply "id" (uuid); idempotent by (userId,id)
+{ "id": "uuid?", "name": "Design hour", "hsnSac": "998314",
+  "unitPrice": "150000", "taxRatePercent": "18", "unit": "hour" }
+```
+
+| field | type | notes |
+| --- | --- | --- |
+| `name` | string, required | what the app puts in the line item's description |
+| `hsnSac` | string? | |
+| `unitPrice` | string | **paise** (integer as a string); absent/null → `"0"` |
+| `taxRatePercent` | string | decimal string, e.g. `"18"`; absent/null → `"0"` |
+| `unit` | string? | free text — "hour", "page", "piece". Display only |
+| `createdAt` / `updatedAt` | ISO-8601 | **server-stamped** (last write to reach the server wins, as with Customers) |
+
+- `GET /products?q=&limit=&cursor=` — `q` matches `name`. → `{ items, nextCursor, hasMore }`.
+- `GET /products/:id` · `PATCH /products/:id` (partial) · `DELETE /products/:id` (**hard** delete).
+
 ---
 
 ## Invoices (auth)
@@ -115,6 +141,8 @@ server's values are returned so the client can correct itself.
   "customerSnapshot": { "name": "Bob", "stateCode": "27", ... },   // ≤ 8KB JSON
   "companySnapshot":  { "name": "Acme", "stateCode": "27", ... },
   "notes": "…",
+  "themeOverrides": { "accent": "#c2410c" },   // optional: token name -> hex. null/omit = template defaults
+  "hiddenSections": ["signature", "terms"],     // optional: section ids to hide. null/omit = template defaults
   "discountType": "Percentage",           // Flat | Percentage | (omit for none)
   "discountValue": "10",                   // percent, or paise for Flat
   "discountBeforeTax": true,
@@ -127,7 +155,10 @@ server's values are returned so the client can correct itself.
 Response `data` echoes the invoice with **server-computed** `subtotal`, `discountTotal`, `taxTotal`,
 `grandTotal` (paise strings), per-item `taxAmount`/`lineTotal`, and a derived
 `gstSplit: { intraState, cgst, sgst, igst }`. `409` if the `invoiceNumber` is already used or the id
-belongs to another user.
+belongs to another user. `themeOverrides` (object) and `hiddenSections` (array of strings) are
+stored and echoed back **verbatim** — opaque to the server (validated only as object / string-array
+with a small size cap); a missing value means "template defaults". Both are also accepted on
+`/invoices/sync` and returned in `changed`.
 
 ### List / read / patch / delete
 - `GET /invoices?limit=&cursor=&status=&q=` — `status` filters (Draft/Pending/Paid); `q` matches
@@ -138,6 +169,10 @@ belongs to another user.
   `invoiceDate`, `invoiceNumber`, `currency`. (To change items/discount, re-POST the whole
   invoice.) → the updated invoice.
 - `DELETE /invoices/:id` — **soft delete** (tombstone). Idempotent (a repeat returns `200`).
+  Accepts an **optional** JSON body `{ "updatedAt": "<ISO-8601>" }` — the client's delete time, which
+  becomes the tombstone's `updatedAt` (kept **monotonic**: never set below the row's current value).
+  Absent → server `now()`. Send it so a queued/offline delete stays in the same client-clock domain
+  as edits and the sync cursor, and orders consistently against edits made on another device.
 
 ### `POST /invoices/sync` — batch offline sync
 ```json
