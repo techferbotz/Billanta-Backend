@@ -1,5 +1,6 @@
 import { TemplateVersionStatus } from "@prisma/client";
 import { templateRepository } from "../repository/template.repository";
+import { PageParams, PaginatedResult } from "../../../common/pagination";
 import { userRepository } from "../../user/repository/user.repository";
 import { ForbiddenError, NotFoundError } from "../../../common/errors/AppError";
 import {
@@ -22,13 +23,16 @@ export interface CompiledResult {
 }
 
 export class TemplateService {
-  // The active templates for the picker, each annotated with its current version + checksum.
-  async list(): Promise<TemplateListItemDto[]> {
-    const templates = await templateRepository.listActive();
-    const currents = await templateRepository.currentVersionsFor(templates);
-    return templates.map((t) =>
-      toListItemDto(t, t.currentVersionId ? currents.get(t.currentVersionId) : undefined)
-    );
+  // A page of active templates for the picker, each annotated with its current version + checksum.
+  async list(page: PageParams): Promise<PaginatedResult<TemplateListItemDto>> {
+    const result = await templateRepository.listActive(page);
+    const currents = await templateRepository.currentVersionsFor(result.items);
+    return {
+      ...result,
+      items: result.items.map((t) =>
+        toListItemDto(t, t.currentVersionId ? currents.get(t.currentVersionId) : undefined)
+      ),
+    };
   }
 
   async getById(id: string): Promise<TemplateDetailDto> {

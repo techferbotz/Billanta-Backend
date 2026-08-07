@@ -1,5 +1,6 @@
 import { Prisma, Template, TemplateVersion, TemplateVersionStatus } from "@prisma/client";
 import { prisma } from "../../../prisma/client";
+import { PageParams, PaginatedResult, paginate } from "../../../common/pagination";
 
 // All Template / TemplateVersion database access — shared by the public template module
 // (read-only serving) and the admin authoring module. No Prisma outside this file.
@@ -37,9 +38,16 @@ export interface NewVersionData {
 
 export class TemplateRepository {
   // --- reads (public + admin) -------------------------------------------------------
-  // Active templates for the picker, in display order.
-  listActive(): Promise<Template[]> {
-    return prisma.template.findMany({ where: { isActive: true }, orderBy: [{ orderIndex: "asc" }, { id: "asc" }] });
+  // A page of active templates for the picker, in display order. Cursor-paginated by id (same total
+  // order + keyset the other list endpoints use), so the picker can load the catalogue incrementally.
+  async listActive(page: PageParams): Promise<PaginatedResult<Template>> {
+    const rows = await prisma.template.findMany({
+      where: { isActive: true },
+      orderBy: [{ orderIndex: "asc" }, { id: "asc" }],
+      take: page.limit + 1,
+      ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
+    });
+    return paginate(rows, page.limit);
   }
 
   // Every template (admin listing), active or not.

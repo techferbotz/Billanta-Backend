@@ -2,11 +2,13 @@ import { Request, Response } from "express";
 import { sendSuccess } from "../../../common/response/apiResponse";
 import { BadRequestError } from "../../../common/errors/AppError";
 import { getOptionalUserId } from "../../../common/utils/getUserId";
+import { parsePagination } from "../../../common/pagination";
 import { templateService } from "../service/template.service";
 
-// GET /templates — the picker list (works logged-out).
-export const listTemplates = async (_req: Request, res: Response): Promise<void> => {
-  sendSuccess(res, { items: await templateService.list() });
+// GET /templates?limit=&cursor= — the picker list (works logged-out), cursor-paginated.
+export const listTemplates = async (req: Request, res: Response): Promise<void> => {
+  const page = parsePagination(req);
+  sendSuccess(res, await templateService.list(page));
 };
 
 // GET /templates/:id

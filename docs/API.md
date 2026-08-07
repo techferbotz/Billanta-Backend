@@ -195,8 +195,10 @@ with a small size cap); a missing value means "template defaults". Both are also
 
 ## Templates (optional auth)
 
-- `GET /templates` → `{ items: [ { id, name, category, thumbnailUrl, isPremium, currentVersion,
-  checksum } ] }` (active templates; premium ones included for upsell).
+- `GET /templates?limit=&cursor=` → `{ items: [ { id, name, category, thumbnailUrl, isPremium,
+  currentVersion, checksum } ], nextCursor, hasMore }` — active templates, **cursor-paginated** like
+  the other lists (premium ones included for upsell). Backward-compatible: a small catalogue returns
+  one page with `nextCursor: null`.
 - `GET /templates/:id` → full detail incl. `currentVersion`, `checksum`, `isActive`.
 - `GET /templates/:id/compiled?version=` → the **Billanta Template JSON** (see
   [`TEMPLATE_JSON.md`](TEMPLATE_JSON.md)) in `data`. Sends an `ETag` (the checksum); repeat with
