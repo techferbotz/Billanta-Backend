@@ -41,8 +41,9 @@ capabilities — new node types, new style properties — by publishing a new te
 - `page.size` is `"A4"` for V1 (the field exists so more can be added compatibly).
 - `page.margin` is in **points**, derived from the root element's padding (default 36pt ≈ 0.5in).
 - `page.fontFamily` / `page.baseFontSize` (points) are the document defaults.
-- `theme` and `sections` (both **optional**) — the template-customisation layer, present only when
-  the template declares colour tokens / tags named sections. See "Template customisation" below.
+- `theme`, `sections` and `customisation` (all **optional**) — the template-customisation layer,
+  present only when the template declares colour tokens / named sections / an explicit control list.
+  See "Template customisation" below.
 
 ## Units, colors, values
 
@@ -166,6 +167,12 @@ Any node whose style uses a token also carries a `tokens` map from **style key �
 A renderer that does: wherever a node names a token for a style key, substitute the user's chosen
 colour (from the invoice's `themeOverrides`) for that key, falling back to the token's `default`.
 
+Because `color` is an inherited property, a `color` token is emitted on the **text nodes that
+actually draw it** (not only on the element that declared it), so recolouring reaches every glyph in
+that colour. Non-inherited colours (`backgroundColor`, `border*Color`) are tokenised on the element
+that draws them. Net effect: every element rendered in a token's colour carries the token, so an
+override never leaves a stray element in the old colour.
+
 ### Named sections
 
 Document-level `sections` tags the top-level blocks so the app can build show/hide toggles with real
@@ -184,6 +191,35 @@ and the corresponding node carries `"section": "payment"`. `hidable: false` mark
 always render (header, bill-to, items, totals). The app hides a block whose id is in the invoice's
 `hiddenSections`. An unknown `section` id is ignored, so the vocabulary can grow. Known ids:
 `header, parties, items, totals, payment, notes, signature, terms`.
+
+### Which controls to show (optional)
+
+By default the app builds the customisation sheet by inference — the template switcher, then one
+swatch per `theme.tokens`, then one toggle per hidable `sections` entry. A template can instead state
+its sheet outright with a document-level `customisation` array, in display order:
+
+```json
+"customisation": [
+  { "type": "template", "title": "Template" },
+  { "type": "color",    "title": "Accent colour",   "token": "accent" },
+  { "type": "section",  "title": "Payment details", "section": "payment" }
+]
+```
+
+| `type` | extra field | meaning |
+| --- | --- | --- |
+| `color` | `token` — a `theme.tokens` name | pick a colour for that token |
+| `section` | `section` — a `sections` id | show/hide that section |
+| `template` | — | switch template; the app supplies the list |
+
+- Order is display order. `title` is the label; the app falls back to the token/section id when it's
+  omitted.
+- A control naming a token/section the template doesn't declare, or a `type` the app doesn't know, is
+  **ignored** — never a hard error — so new control types ship backend-first, exactly like new node
+  types.
+- **Omitting `customisation` keeps today's behaviour**: the app synthesises the sheet from
+  `theme.tokens` + `sections`. Add the array only where a template wants explicit control (a second
+  colour, a renamed or reordered control, exposing only some tokens).
 
 ### Where the user's choice is stored
 

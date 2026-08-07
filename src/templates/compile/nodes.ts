@@ -196,6 +196,17 @@ export interface SectionDef {
   hidable: boolean;
 }
 
+// A single control in the app's customisation sheet (APP-005), emitted in display order. `type` is
+// "color" (carries `token`), "section" (carries `section`), "template" (no extra field), or a future
+// type an older app harmlessly ignores. `title` is the user-facing label; the app falls back to the
+// token/section id when it's absent.
+export interface CustomisationControl {
+  type: string;
+  title?: string;
+  token?: string;
+  section?: string;
+}
+
 // The whole compiled document — exactly what GET /templates/:id/compiled returns.
 export interface CompiledTemplate {
   schemaVersion: number;
@@ -205,5 +216,8 @@ export interface CompiledTemplate {
   // (not empty) when it does not, so an untagged template's bytes are unchanged.
   theme?: Theme;
   sections?: SectionDef[];
+  // Optional explicit ordering/labelling of the customisation sheet (APP-005). Absent => the app
+  // synthesises today's sheet from `theme.tokens` + `sections`.
+  customisation?: CustomisationControl[];
   root: TemplateNode;
 }

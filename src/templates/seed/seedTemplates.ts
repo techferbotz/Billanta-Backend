@@ -25,7 +25,7 @@ const CLASSIC: SeedTemplate = {
   category: "Business",
   isPremium: false,
   html: `
-<div class="page" data-page-size="A4">
+<div class="page" data-page-size="A4" data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Accent colour","token":"accent"},{"type":"section","title":"Payment details","section":"payment"},{"type":"section","title":"Notes","section":"notes"}]'>
   <div class="top" data-section="header">
     <div class="brand">
       <img class="logo" src="{{ company.logo }}" />
@@ -71,7 +71,7 @@ const CLASSIC: SeedTemplate = {
     <tfoot>
       <tr><td colspan="3" class="num">Subtotal</td><td class="num">{{ invoice.subtotal | currency }}</td></tr>
       <tr><td colspan="3" class="num">Tax</td><td class="num">{{ invoice.tax | currency }}</td></tr>
-      <tr class="grand"><td colspan="3" class="num">Total</td><td class="num"><strong>{{ invoice.total | currency }}</strong></td></tr>
+      <tr class="grand"><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ invoice.total | currency }}</strong></td></tr>
     </tfoot>
   </table>
 
@@ -113,7 +113,7 @@ const MINIMAL: SeedTemplate = {
   category: "Minimal",
   isPremium: false,
   html: `
-<div class="page" data-page-size="A4">
+<div class="page" data-page-size="A4" data-token="color:accent" data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Colour","token":"accent"}]'>
   <div class="head" data-section="header">
     <div class="title" data-token="color:accent">Invoice</div>
     <div class="no">{{ invoice.number }}</div>
@@ -137,7 +137,7 @@ const MINIMAL: SeedTemplate = {
 
   <table class="items" data-section="items">
     <thead>
-      <tr><th class="desc">Item</th><th class="num">Qty</th><th class="num">Amount</th></tr>
+      <tr><th class="desc" data-token="borderBottomColor:accent">Item</th><th class="num" data-token="borderBottomColor:accent">Qty</th><th class="num" data-token="borderBottomColor:accent">Amount</th></tr>
     </thead>
     <tbody>
       <tr data-repeat="items as item">
@@ -148,7 +148,7 @@ const MINIMAL: SeedTemplate = {
     </tbody>
   </table>
 
-  <div class="total" data-section="totals">
+  <div class="total" data-section="totals" data-token="borderTopColor:accent">
     <span class="k">Total due</span>
     <span class="amt">{{ invoice.total | currency }}</span>
   </div>
@@ -215,7 +215,7 @@ const BOLD: SeedTemplate = {
     <div class="summary" data-section="totals">
       <div class="line"><span>Subtotal</span><span>{{ invoice.subtotal | currency }}</span></div>
       <div class="line"><span>Tax</span><span>{{ invoice.tax | currency }}</span></div>
-      <div class="line grand"><span>Total</span><span>{{ invoice.total | currency }}</span></div>
+      <div class="line grand" data-token="borderTopColor:accent"><span>Total</span><span>{{ invoice.total | currency }}</span></div>
     </div>
   </div>
 </div>`,

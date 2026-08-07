@@ -20,6 +20,7 @@ import {
   Theme,
   ThemeToken,
   SectionDef,
+  CustomisationControl,
 } from "./nodes";
 import { failAt, CompileError, ValueError } from "./errors";
 import { AuthoredElement, AuthoredNode, parseHtml } from "../html/parser";
@@ -85,6 +86,14 @@ const TOKEN_LABELS: Record<string, string> = {
 };
 
 const capitalize = (s: string): string => (s.length ? s[0].toUpperCase() + s.slice(1) : s);
+
+// A node's token map with keys in a fixed (sorted) order, so equivalent tagging serializes to
+// identical bytes regardless of author order or how the map was assembled.
+const orderTokens = (map: Record<string, string>): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(map).sort()) out[key] = map[key];
+  return out;
+};
 
 export interface CompileResult {
   compiled: CompiledTemplate;
@@ -493,9 +502,7 @@ class Compiler {
       if (!this.themeTokens.has(tokenName)) this.themeTokens.set(tokenName, hex);
     }
     // Emit style keys in a fixed (sorted) order for byte-identical output regardless of author order.
-    const ordered: Record<string, string> = {};
-    for (const key of Object.keys(out).sort()) ordered[key] = out[key];
-    return ordered;
+    return orderTokens(out);
   }
 
   private buildTheme(): Theme | undefined {
@@ -523,6 +530,102 @@ class Compiler {
       }
     }
     return out;
+  }
+
+  // `color` is an INHERITED property, so a color token declared on an element (e.g. a <div> that
+  // compiles to a box, whose text lives in child text nodes) must reach the text nodes that actually
+  // draw that colour. Walk top-down carrying the active color token; attach it to every text node
+  // that draws the token's colour and has no color token of its own. Mirrors how the cascade already
+  // inherits `color` down the tree, and fixes the under-application in APP-004.
+  private propagateColorTokens(
+    node: TemplateNode,
+    inherited: { name: string; value: string } | undefined
+  ): void {
+    // Structural wrappers carry no style — pass the inherited token straight to the child.
+    if (node.type === "repeat" || node.type === "conditional") {
+      this.propagateColorTokens(node.child, inherited);
+      return;
+    }
+
+    let active = inherited;
+    const own = node.tokens?.color;
+    const color = typeof node.style.color === "string" ? node.style.color.toLowerCase() : undefined;
+
+    if (own) {
+      // This node re-declares the color token; it and its subtree inherit THIS one.
+      active = { name: own, value: color ?? inherited?.value ?? "" };
+    } else if (color !== undefined && active) {
+      if (color === active.value.toLowerCase()) {
+        // Draws the inherited token's colour — only a text node makes that visible, so tag it there.
+        if (node.type === "text") node.tokens = orderTokens({ ...(node.tokens ?? {}), color: active.name });
+      } else {
+        // Overrides color to a non-token colour — its subtree must not inherit the old token.
+        active = undefined;
+      }
+    }
+
+    if (node.type === "box" || node.type === "cell") {
+      for (const c of node.children) this.propagateColorTokens(c, active);
+    } else if (node.type === "row") {
+      for (const c of node.cells) this.propagateColorTokens(c, active);
+    } else if (node.type === "table") {
+      for (const r of node.header) this.propagateColorTokens(r, active);
+      if (node.body.row) this.propagateColorTokens(node.body.row, active);
+      if (node.body.rows) for (const r of node.body.rows) this.propagateColorTokens(r, active);
+      for (const r of node.footer) this.propagateColorTokens(r, active);
+    }
+    // text / image / divider have no text-bearing children.
+  }
+
+  // Optional, author-declared customisation sheet (APP-005): a JSON array on the root's
+  // `data-customisation` attribute, emitted in author (display) order. A control whose `type` this
+  // build doesn't special-case is still emitted (type + optional title) — the app ignores unknown
+  // types and unresolved token/section bindings — so new control types ship backend-first.
+  private buildCustomisation(): CustomisationControl[] | undefined {
+    const raw = this.root.attrs.get("data-customisation");
+    if (raw === undefined) return undefined;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      failAt("structure", "data-customisation must be valid JSON", this.root.line);
+    }
+    if (!Array.isArray(parsed)) {
+      failAt("structure", "data-customisation must be a JSON array", this.root.line);
+    }
+    const arr = parsed as unknown[];
+    if (arr.length > 32) {
+      failAt("structure", "data-customisation has too many controls (max 32)", this.root.line);
+    }
+
+    const out: CustomisationControl[] = [];
+    for (const item of arr) {
+      if (typeof item !== "object" || item === null || Array.isArray(item)) {
+        failAt("structure", "each data-customisation entry must be an object", this.root.line);
+        continue; // unreachable — failAt throws
+      }
+      const rec = item as Record<string, unknown>;
+      if (typeof rec.type !== "string" || rec.type.length === 0) {
+        failAt("structure", 'each data-customisation entry needs a non-empty string "type"', this.root.line);
+        continue; // unreachable
+      }
+      const control: CustomisationControl = { type: rec.type };
+      if (typeof rec.title === "string") control.title = rec.title;
+      if (rec.type === "color") {
+        if (typeof rec.token !== "string" || rec.token.length === 0) {
+          failAt("structure", 'a "color" customisation control needs a string "token"', this.root.line);
+        }
+        control.token = rec.token as string;
+      } else if (rec.type === "section") {
+        if (typeof rec.section !== "string" || rec.section.length === 0) {
+          failAt("structure", 'a "section" customisation control needs a string "section"', this.root.line);
+        }
+        control.section = rec.section as string;
+      }
+      out.push(control);
+    }
+    return out.length ? out : undefined;
   }
 
   // --- page setup -------------------------------------------------------------------
@@ -554,11 +657,14 @@ class Compiler {
     const rootNode = this.compileElement(this.root, false) as BoxNode | TextNode;
     this.tagNode(rootNode, this.root);
     stripPadding(rootNode.style);
+    // Push color tokens down to the text nodes that actually draw them (APP-004).
+    this.propagateColorTokens(rootNode, undefined);
 
     // Assembled from what the tree walk collected; included only when non-empty so an untagged
-    // template's bytes (and checksum) are exactly as before. [APP-003]
+    // template's bytes (and checksum) are exactly as before. [APP-003 / APP-005]
     const theme = this.buildTheme();
     const sections = this.buildSections();
+    const customisation = this.buildCustomisation();
 
     const compiled: CompiledTemplate = {
       schemaVersion: SCHEMA_VERSION,
@@ -566,6 +672,7 @@ class Compiler {
       page,
       ...(theme ? { theme } : {}),
       ...(sections.length ? { sections } : {}),
+      ...(customisation ? { customisation } : {}),
       root: rootNode,
     };
     const checksum = createHash("sha256").update(JSON.stringify(compiled)).digest("hex");
