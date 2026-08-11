@@ -55,6 +55,9 @@ export type Value = LiteralValue | BindValue;
 export interface Span {
   value: Value;
   style?: ResolvedStyle;
+  // Like a node's `tokens` (APP-006): maps a style key (in practice `color`) to a theme-token name so
+  // an inline run recolours with its theme. `style` keeps the literal hex; an older app ignores this.
+  tokens?: Record<string, string>;
 }
 
 // --- Nodes -------------------------------------------------------------------------
@@ -194,6 +197,10 @@ export interface SectionDef {
   id: string;
   label: string;
   hidable: boolean;
+  // What data tapping the section edits (APP-007): "customer" | "invoiceDetails" | "items" |
+  // "discount" | "notes" | "company" | "none". Optional — absent or an unrecognised value is treated
+  // as "none" (shown on the page, absent from the editor list), so a new editor kind ships backend-first.
+  edits?: string;
 }
 
 // A single control in the app's customisation sheet (APP-005), emitted in display order. `type` is

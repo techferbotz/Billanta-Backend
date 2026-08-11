@@ -71,7 +71,7 @@ const CLASSIC: SeedTemplate = {
     <tfoot>
       <tr><td colspan="3" class="num">Subtotal</td><td class="num">{{ invoice.subtotal | currency }}</td></tr>
       <tr><td colspan="3" class="num">Tax</td><td class="num">{{ invoice.tax | currency }}</td></tr>
-      <tr class="grand"><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ invoice.total | currency }}</strong></td></tr>
+      <tr class="grand" data-section="totals"><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ invoice.total | currency }}</strong></td></tr>
     </tfoot>
   </table>
 

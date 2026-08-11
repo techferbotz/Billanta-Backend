@@ -93,11 +93,14 @@ A dynamic value is a **literal** or a **binding**:
   printed as, e.g., `₹5,310.00`). The compiler never formats.
 - `fallback` — a literal string to show when the bound path resolves empty (`""` if none).
 
-A **span** is a run of text within a `text` node, with an optional inline style:
+A **span** is a run of text within a `text` node, with an optional inline `style` and — like a node —
+an optional `tokens` map (APP-006), so a coloured inline run (e.g. a bold total) recolours with its
+theme rather than keeping the literal hex:
 
 ```json
 { "value": { "kind": "literal", "text": "Total: " } }
-{ "value": { "kind": "bind", "path": "invoice.total", "format": "currency", "fallback": "" }, "style": { "fontWeight": 700 } }
+{ "value": { "kind": "bind", "path": "invoice.total", "format": "currency", "fallback": "" },
+  "style": { "fontWeight": 700, "color": "#222831" }, "tokens": { "color": "accent" } }
 ```
 
 ## Node types
@@ -170,27 +173,37 @@ colour (from the invoice's `themeOverrides`) for that key, falling back to the t
 Because `color` is an inherited property, a `color` token is emitted on the **text nodes that
 actually draw it** (not only on the element that declared it), so recolouring reaches every glyph in
 that colour. Non-inherited colours (`backgroundColor`, `border*Color`) are tokenised on the element
-that draws them. Net effect: every element rendered in a token's colour carries the token, so an
-override never leaves a stray element in the old colour.
+that draws them. A **span** whose own `color` would otherwise override its node's token carries its
+own `tokens.color` too (APP-006). Net effect: every element — node or span — rendered in a token's
+colour carries the token, so an override never leaves a stray run in the old colour.
 
 ### Named sections
 
-Document-level `sections` tags the top-level blocks so the app can build show/hide toggles with real
-labels:
+Document-level `sections` tags the top-level blocks so the app can build show/hide toggles **and its
+sectioned editor**. Each entry also declares `edits` — what data tapping the section edits (APP-007):
 
 ```json
 "sections": [
-  { "id": "header",  "label": "Header",          "hidable": false },
-  { "id": "items",   "label": "Item table",      "hidable": false },
-  { "id": "payment", "label": "Payment details", "hidable": true },
-  { "id": "notes",   "label": "Notes",           "hidable": true }
+  { "id": "header",  "label": "Invoice details", "hidable": false, "edits": "invoiceDetails" },
+  { "id": "parties", "label": "Bill to",         "hidable": false, "edits": "customer" },
+  { "id": "items",   "label": "Items",           "hidable": false, "edits": "items" },
+  { "id": "totals",  "label": "Total",           "hidable": false, "edits": "discount" },
+  { "id": "notes",   "label": "Notes",           "hidable": true,  "edits": "notes" },
+  { "id": "payment", "label": "Payment details", "hidable": true,  "edits": "company" }
 ]
 ```
 
 and the corresponding node carries `"section": "payment"`. `hidable: false` marks blocks that must
-always render (header, bill-to, items, totals). The app hides a block whose id is in the invoice's
-`hiddenSections`. An unknown `section` id is ignored, so the vocabulary can grow. Known ids:
-`header, parties, items, totals, payment, notes, signature, terms`.
+always render (invoice details, bill-to, items, total). The app hides a block whose id is in the
+invoice's `hiddenSections`.
+
+- **`edits`** vocabulary: `customer`, `invoiceDetails`, `items`, `discount`, `notes`, `company`,
+  `none`. It is **optional** — absent or an unrecognised value is treated as `none` (shown on the
+  page, absent from the editor list), so a new editor kind ships backend-first.
+- The **`sections` array order is the editor's fill order** — details, customer, items, total, then
+  the optional blocks.
+- An unknown `section` id is ignored, so the vocabulary can grow. Known ids: `header, parties, items,
+  totals, payment, notes, signature, terms`.
 
 ### Which controls to show (optional)
 

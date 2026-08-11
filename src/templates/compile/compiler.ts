@@ -62,19 +62,20 @@ const DEFAULT_FONT_SIZE = 11; // pt
 // so an attacker-controlled colspan can never cause an OOM/hang.
 const MAX_COLSPAN = 64;
 
-// The canonical section vocabulary (APP-003): stable id -> human label + whether the app may hide
-// the block. An author tags a top-level block with data-section="<id>" and the compiler emits the
-// matching entry. An id outside this list still works (emitted with a derived label, hidable), so
-// the vocabulary can grow without a compiler change.
-const SECTION_VOCAB: { id: string; label: string; hidable: boolean }[] = [
-  { id: "header", label: "Header", hidable: false },
-  { id: "parties", label: "Bill to", hidable: false },
-  { id: "items", label: "Item table", hidable: false },
-  { id: "totals", label: "Totals", hidable: false },
-  { id: "payment", label: "Payment details", hidable: true },
-  { id: "notes", label: "Notes", hidable: true },
-  { id: "signature", label: "Signature", hidable: true },
-  { id: "terms", label: "Terms", hidable: true },
+// The canonical section vocabulary (APP-003 + APP-007): stable id -> human label, whether the app may
+// hide the block, and `edits` (what data tapping it edits). The ORDER here is the order sections are
+// emitted — i.e. the editor's fill order: details, customer, items, totals, then the optional blocks.
+// An author tags a top-level block with data-section="<id>"; an id outside this list still works
+// (emitted with a derived label, hidable, and no `edits`), so the vocabulary can grow.
+const SECTION_VOCAB: { id: string; label: string; hidable: boolean; edits: string }[] = [
+  { id: "header", label: "Invoice details", hidable: false, edits: "invoiceDetails" },
+  { id: "parties", label: "Bill to", hidable: false, edits: "customer" },
+  { id: "items", label: "Items", hidable: false, edits: "items" },
+  { id: "totals", label: "Total", hidable: false, edits: "discount" },
+  { id: "notes", label: "Notes", hidable: true, edits: "notes" },
+  { id: "payment", label: "Payment details", hidable: true, edits: "company" },
+  { id: "signature", label: "Signature", hidable: true, edits: "company" },
+  { id: "terms", label: "Terms", hidable: true, edits: "none" },
 ];
 
 // Human labels for the colour tokens users recognise; any other token name gets a capitalised
@@ -520,7 +521,7 @@ class Compiler {
     // Canonical vocabulary first, in canonical order, for the ids the template actually used…
     for (const def of SECTION_VOCAB) {
       if (this.sectionsUsed.has(def.id)) {
-        out.push({ id: def.id, label: def.label, hidable: def.hidable });
+        out.push({ id: def.id, label: def.label, hidable: def.hidable, edits: def.edits });
       }
     }
     // …then any id outside the vocabulary, in first-occurrence order, defaulting to hidable.
@@ -561,6 +562,20 @@ class Compiler {
       } else {
         // Overrides color to a non-token colour — its subtree must not inherit the old token.
         active = undefined;
+      }
+    }
+
+    // A `text` node's spans carry their own resolved `style`; a <span>/<strong>/<em> run emits an
+    // explicit `color` (often just the inherited one) that would OVERRIDE the node's token and keep
+    // the old colour. Tag any span drawing the active token's colour so it recolours too (APP-006).
+    // A span with no color, or a genuinely different one, is left alone.
+    if (node.type === "text" && active) {
+      const want = active.value.toLowerCase();
+      for (const span of node.spans) {
+        const sc = typeof span.style?.color === "string" ? span.style.color.toLowerCase() : undefined;
+        if (sc !== undefined && sc === want) {
+          span.tokens = orderTokens({ ...(span.tokens ?? {}), color: active.name });
+        }
       }
     }
 
