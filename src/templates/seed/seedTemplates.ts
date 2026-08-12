@@ -51,7 +51,8 @@ const CLASSIC: SeedTemplate = {
     <div class="muted" data-if="customer.gstin">GSTIN: {{ customer.gstin }}</div>
   </div>
 
-  <table class="items" data-section="items">
+  <div class="itemsblock" data-section="items">
+  <table class="items" data-if="items">
     <thead>
       <tr>
         <th class="desc" data-token="backgroundColor:accent">Description</th>
@@ -74,6 +75,8 @@ const CLASSIC: SeedTemplate = {
       <tr class="grand" data-section="totals"><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ invoice.total | currency }}</strong></td></tr>
     </tfoot>
   </table>
+  <div class="empty" data-unless="items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+  </div>
 
   <div class="pay" data-section="payment" data-if="payment.upi">
     <div class="label">Payment</div>
@@ -101,6 +104,8 @@ const CLASSIC: SeedTemplate = {
 .items td.num { text-align: right; }
 .items tfoot td { border-bottom: 0; }
 .grand td { border-top: 2px solid #2b3648; font-size: 12pt; }
+.empty { margin-top: 18px; padding: 22px; border: 1.5pt dashed #94a3b8; border-radius: 8px; text-align: center; }
+.emptylabel { color: #94a3b8; font-size: 10pt; }
 .pay { margin-top: 20px; padding: 12px 14px; background-color: #f4f6fa; border-radius: 6px; }
 .notes { margin-top: 16px; font-size: 9pt; color: #6a7180; }`,
 };

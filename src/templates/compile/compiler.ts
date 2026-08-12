@@ -217,10 +217,14 @@ class Compiler {
   private compileWithWrappers(el: AuthoredElement, insideRepeat: boolean): TemplateNode {
     const repeatAttr = el.attrs.get("data-repeat");
     const ifAttr = el.attrs.get("data-if");
+    const unlessAttr = el.attrs.get("data-unless");
+    if (ifAttr !== undefined && unlessAttr !== undefined) {
+      failAt("structure", "an element cannot have both data-if and data-unless", el.line);
+    }
 
     let node = this.compileElement(el, insideRepeat || repeatAttr !== undefined);
-    // Attach data-section / data-token to the element's OWN node, before any repeat/conditional
-    // wrapper (which carries no style or tags). [APP-003]
+    // Attach data-section / data-token / data-editor-only to the element's OWN node, before any
+    // repeat/conditional wrapper (which carries no style or tags). [APP-003 / APP-008]
     if ("style" in node) this.tagNode(node, el);
 
     if (repeatAttr !== undefined) {
@@ -229,6 +233,10 @@ class Compiler {
     }
     if (ifAttr !== undefined) {
       node = { type: "conditional", path: this.parsePath(ifAttr, el.line), child: node };
+    }
+    if (unlessAttr !== undefined) {
+      // data-unless — the same gate inverted: render only when the path is FALSY (APP-008).
+      node = { type: "conditional", path: this.parsePath(unlessAttr, el.line), negate: true, child: node };
     }
     return node;
   }
@@ -460,7 +468,7 @@ class Compiler {
   // Attach an element's data-section / data-token tags to its compiled node, and register them so
   // the document-level `theme` and `sections` can be assembled once the walk finishes.
   private tagNode(
-    node: { style: ResolvedStyle; section?: string; tokens?: Record<string, string> },
+    node: { style: ResolvedStyle; section?: string; tokens?: Record<string, string>; editorOnly?: boolean },
     el: AuthoredElement
   ): void {
     const sectionAttr = el.attrs.get("data-section");
@@ -476,6 +484,8 @@ class Compiler {
       const tokens = this.parseTokens(tokenAttr, node.style, el.line);
       if (Object.keys(tokens).length) node.tokens = tokens;
     }
+    // data-editor-only: mark a node the app shows only while editing and drops from every export (APP-008).
+    if (el.attrs.get("data-editor-only") !== undefined) node.editorOnly = true;
   }
 
   // Parse `data-token="styleKey:tokenName …"`. Each pair names a token for one style key; the

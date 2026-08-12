@@ -117,7 +117,7 @@ Every node has `type` and `style`.
 | `row` | `{ type, style, cells: Cell[] }` | |
 | `cell` | `{ type, style, colSpan: number, children: Node[] }` | |
 | `repeat` | `{ type, path, as, child: Node }` | render `child` once per element of the array at `path`, binding each to `as` |
-| `conditional` | `{ type, path, child: Node }` | render `child` only if `path` is truthy |
+| `conditional` | `{ type, path, negate?, child: Node }` | render `child` only when `path` is truthy; with `negate: true` (from `data-unless`) only when it is FALSY |
 
 **`TableBody`** is EITHER a repeating row or a list of static rows (never both):
 
@@ -130,9 +130,12 @@ Every node has `type` and `style`.
 `colSpan`. When a `repeat`/`conditional` wraps an element that also has the other, the
 `conditional` is outermost (gate, then repeat).
 
-Additionally, **any node may carry two optional keys** — `section` (a string id) and `tokens` (a
-style-key → token-name map) — for the customisation layer described next. They appear only on tagged
-nodes; a renderer that ignores them draws exactly as before.
+Additionally, **any node may carry optional keys** — `section` (a string id) and `tokens` (a style-key
+→ token-name map) for the customisation layer described next, and **`editorOnly: true`** (APP-008): the
+app renders an editor-only node ONLY while editing and drops it from every export (PDF/PNG/JPEG), so a
+template can author an empty-state placeholder that never prints on a real invoice. All are optional and
+appear only on tagged nodes. A renderer that ignores them draws as before — which means it would print
+an `editorOnly` node, so only mark nodes that are safe to omit.
 
 ## Template customisation — colour tokens + named sections (optional)
 

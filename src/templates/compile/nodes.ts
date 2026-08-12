@@ -69,6 +69,11 @@ export interface Span {
 export interface Tagged {
   section?: string;
   tokens?: Record<string, string>;
+  // Editor-only nodes (APP-008): the app renders these ONLY while editing and drops them from every
+  // export (PDF/PNG/JPEG), so a template's empty-state placeholder never prints on a real invoice.
+  // Optional; absent or an unknown value = false. Only set it on nodes safe to omit (empty-state
+  // boxes) — an older renderer that ignores the flag would otherwise print them.
+  editorOnly?: boolean;
 }
 
 export interface BoxNode extends Tagged {
@@ -150,6 +155,9 @@ export interface RepeatNode {
 export interface ConditionalNode {
   type: "conditional";
   path: string;
+  // Render `child` only when `path` is truthy; with `negate: true` (authored as data-unless) only
+  // when it is FALSY — e.g. an empty-state shown when `items` is empty (APP-008). Absent = false.
+  negate?: boolean;
   child: TemplateNode;
 }
 

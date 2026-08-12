@@ -100,6 +100,12 @@ signature.url
   `item`. On a `<tr>` inside `<tbody>`, it becomes the table's repeating line-item row (the common
   case). A table body may have **either** one `data-repeat` row **or** static rows, not both.
 - **`data-if="payment.upi"`** — render this element only when the path is truthy.
+- **`data-unless="items"`** — the inverse: render only when the path is FALSY. Pair a `data-if` and a
+  `data-unless` sibling for an empty state — show the table when `items` has rows, show an "Add items"
+  box when it doesn't. An element may not carry both.
+- **`data-editor-only`** — mark an element the app renders ONLY while editing; it is dropped from every
+  export (PDF/PNG/JPEG). Pair it with `data-unless` for an empty-state placeholder that never prints on
+  a real invoice.
 
 ```html
 <table>
