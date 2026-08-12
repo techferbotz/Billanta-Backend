@@ -20,7 +20,8 @@ here is an *authoring language*, not a runtime. A template you generate MUST:
 1. **Compile cleanly** through the real compiler (anything outside the subset is rejected).
 2. Be **fully themed** — every element drawn in a theme colour is tokenised, so a user's colour
    override never leaves a stray element behind (this is a hard, verified gate).
-3. Expose the **sections** (with `edits`) and optional **customisation** the app's editor is built on.
+3. Expose the **sections** (with `edits`), **empty-state placeholders**, and optional
+   **customisation** the app's section editor is built on.
 
 **Never publish a template that has not passed `verifyTemplate.ts` (Step 4).**
 
@@ -49,6 +50,10 @@ Not a demo. Compose, top to bottom:
 - **Line-item table** — description, qty, rate, amount, as a single `data-repeat` row.
 - **Totals** — subtotal, tax, and a bold grand total.
 - Optional: **payment** (UPI / bank), **notes**, **signature**.
+
+The app creates an invoice **empty** and fills it section by section, so a production template should
+also carry an **empty-state placeholder** for each editable section (Step 3b) — shown only in the
+editor while that section has no data yet.
 
 Indian invoicing conventions: ₹, GST, HSN/SAC. Design: clear hierarchy, generous whitespace, numbers
 right-aligned, 9–11pt body with a larger title, one accent used with restraint. Lay out with
@@ -82,7 +87,10 @@ items[]     description hsnSac quantity unitPrice taxRate amount
 payment.*   upi qr bankName accountNumber ifsc      signature.url
 ```
 **Repeat/conditional:** `data-repeat="items as item"` on the `<tbody>`'s `<tr>` (one repeat row per
-table, no static rows alongside it); `data-if="payment.upi"` renders an element only when truthy.
+table, no static rows alongside it); `data-if="payment.upi"` renders an element only when the path is
+truthy; `data-unless="items"` only when it is FALSY (the two pair up for empty states — Step 3b, and an
+element may not carry both); `data-editor-only` marks an element the app shows ONLY while editing and
+drops from every export.
 
 ## Step 3 — Theme it fully (this is what makes it production quality)
 
@@ -110,6 +118,40 @@ Declare a colour token and apply it to **every** element drawn in that colour, o
   state the edit-sheet order/labels explicitly, e.g.
   `[{"type":"template","title":"Template"},{"type":"color","title":"Brand colour","token":"accent"},{"type":"section","title":"Payment","section":"payment"}]`.
   Omit it to let the app synthesise the sheet from tokens + sections.
+
+## Step 3b — Empty states (support the app's section editor)
+
+The app creates an invoice empty and fills it section by section; wherever a section has no data yet it
+shows a "tap to add" placeholder. Let the **template** own that placeholder so it's styled to match the
+rest of the design — otherwise the app falls back to a generic dashed box.
+
+Pattern: inside a section wrapper, pair the real content (`data-if`) with a dashed, **editor-only**
+placeholder (`data-unless`) on the same binding:
+
+```html
+<div class="itemsblock" data-section="items">
+  <table class="items" data-if="items"> … the real items table … </table>
+  <div class="empty" data-unless="items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+</div>
+```
+```css
+.empty { margin-top: 18px; padding: 22px; border: 1.5pt dashed #94a3b8; border-radius: 8px; text-align: center; }
+.emptylabel { color: #94a3b8; font-size: 10pt; }
+```
+
+Rules that matter:
+- `data-editor-only` is a **hard guarantee** — the app renders that node only while editing and drops
+  it from every export (PDF/PNG/JPEG), so it never prints on a real invoice. Only put it on placeholders.
+- The placeholder must compile to a **box**, so it draws its own dashed border: give it a **block child**
+  (e.g. a nested `<div>` around the label). A bare text `<div>Add…</div>` becomes a text node whose
+  border the renderer leaves to its parent — the dash won't show. `verifyTemplate` can't catch this; it
+  is on you.
+- Give the dashed border a **non-token** colour (a neutral grey). If you dash it in the accent colour,
+  tokenise every border side or verify flags a straggler.
+- Key emptiness on a real binding: `items`, `customer.name`, `invoice.notes`, `payment.upi`, …
+- Add one for each **editable** section you want styled (`parties`, `items`, `notes`, `payment`, …).
+  Any section you skip still works (the app synthesises a fallback). `classic` in the seed file is the
+  worked example (its items section).
 
 ## Step 4 — Verify (HARD GATE — never skip, never publish without a PASS)
 
