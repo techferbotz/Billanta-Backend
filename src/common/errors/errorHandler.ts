@@ -53,6 +53,26 @@ export const errorHandler = (
       fail(409, "Resource already exists");
       return;
     }
+    // P2003 — foreign-key violation. The only FK a client write can hit in this app is
+    // `<resource>.userId -> User`: it fires when the authenticated token's account no longer exists
+    // (deleted, or a token minted against a since-reset DB — see APP-009). That is an auth problem,
+    // not a server bug — a read for the same user simply finds nothing and 200s, while a write trips
+    // the constraint. Answer 401 so the client re-authenticates, with a distinct code so it goes
+    // straight to a fresh sign-in (its refresh token is gone with the account, so a refresh can't help).
+    if (err.code === "P2003") {
+      const constraint = typeof err.meta?.constraint === "string" ? err.meta.constraint : "";
+      if (constraint.includes("userId")) {
+        res.status(401).json({
+          success: false,
+          code: "ACCOUNT_NOT_FOUND",
+          message: "Your account no longer exists. Please sign in again.",
+        });
+        return;
+      }
+      // Any other FK means the request itself referenced a non-existent related record.
+      fail(400, "Request references a record that does not exist");
+      return;
+    }
   }
 
   // Anything else is an unexpected bug: log it server-side (never the request body, which
