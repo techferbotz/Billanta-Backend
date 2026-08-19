@@ -73,8 +73,8 @@ const SECTION_VOCAB: { id: string; label: string; hidable: boolean; edits: strin
   { id: "items", label: "Items", hidable: false, edits: "items" },
   { id: "totals", label: "Total", hidable: false, edits: "discount" },
   { id: "notes", label: "Notes", hidable: true, edits: "notes" },
-  { id: "payment", label: "Payment details", hidable: true, edits: "company" },
-  { id: "signature", label: "Signature", hidable: true, edits: "company" },
+  { id: "payment", label: "Payment details", hidable: true, edits: "bankDetails" },
+  { id: "signature", label: "Signature", hidable: true, edits: "signature" },
   { id: "terms", label: "Terms", hidable: true, edits: "none" },
 ];
 

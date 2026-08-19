@@ -192,7 +192,8 @@ sectioned editor**. Each entry also declares `edits` — what data tapping the s
   { "id": "items",   "label": "Items",           "hidable": false, "edits": "items" },
   { "id": "totals",  "label": "Total",           "hidable": false, "edits": "discount" },
   { "id": "notes",   "label": "Notes",           "hidable": true,  "edits": "notes" },
-  { "id": "payment", "label": "Payment details", "hidable": true,  "edits": "company" }
+  { "id": "payment", "label": "Payment details", "hidable": true,  "edits": "bankDetails" },
+  { "id": "signature", "label": "Signature",     "hidable": true,  "edits": "signature" }
 ]
 ```
 
@@ -200,9 +201,11 @@ and the corresponding node carries `"section": "payment"`. `hidable: false` mark
 always render (invoice details, bill-to, items, total). The app hides a block whose id is in the
 invoice's `hiddenSections`.
 
-- **`edits`** vocabulary: `customer`, `invoiceDetails`, `items`, `discount`, `notes`, `company`,
-  `none`. It is **optional** — absent or an unrecognised value is treated as `none` (shown on the
-  page, absent from the editor list), so a new editor kind ships backend-first.
+- **`edits`** vocabulary: `invoiceDetails`, `customer`, `items`, `discount`, `notes`, `bankDetails`,
+  `signature`, `none`. It is **optional** — absent or an unrecognised value is treated as `none` (shown
+  on the page, absent from the editor list), so a new editor kind ships backend-first. `bankDetails`
+  (bank name / account / IFSC / UPI) and `signature` (signature image + signatory) both edit fields on
+  the **company profile**, but each opens a focused editor — they replaced the earlier `company` value.
 - The **`sections` array order is the editor's fill order** — details, customer, items, total, then
   the optional blocks.
 - An unknown `section` id is ignored, so the vocabulary can grow. Known ids: `header, parties, items,

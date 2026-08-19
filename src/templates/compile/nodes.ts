@@ -205,9 +205,11 @@ export interface SectionDef {
   id: string;
   label: string;
   hidable: boolean;
-  // What data tapping the section edits (APP-007): "customer" | "invoiceDetails" | "items" |
-  // "discount" | "notes" | "company" | "none". Optional — absent or an unrecognised value is treated
-  // as "none" (shown on the page, absent from the editor list), so a new editor kind ships backend-first.
+  // What data tapping the section edits (APP-007): "invoiceDetails" | "customer" | "items" |
+  // "discount" | "notes" | "bankDetails" | "signature" | "none". Optional — absent or an unrecognised
+  // value is treated as "none" (shown on the page, absent from the editor list), so a new editor kind
+  // ships backend-first. ("bankDetails"/"signature" replaced the earlier "company" — both edit fields
+  // that live on the company profile, but each opens a focused editor rather than the whole company form.)
   edits?: string;
 }
 
