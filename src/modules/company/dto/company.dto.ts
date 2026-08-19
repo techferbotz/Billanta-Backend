@@ -19,6 +19,8 @@ export interface CompanyDto {
   phone: string | null;
   email: string | null;
   signatureUrl: string | null;
+  signatoryName: string | null;
+  signatoryDesignation: string | null;
   upiId: string | null;
   qrImageUrl: string | null;
   bankName: string | null;
@@ -47,6 +49,8 @@ export interface CompanyWriteData {
   phone: string | null;
   email: string | null;
   signatureUrl: string | null;
+  signatoryName: string | null;
+  signatoryDesignation: string | null;
   upiId: string | null;
   qrImageUrl: string | null;
   bankName: string | null;
@@ -70,6 +74,8 @@ export const toCompanyDto = (c: Company): CompanyDto => ({
   phone: c.phone,
   email: c.email,
   signatureUrl: c.signatureUrl,
+  signatoryName: c.signatoryName,
+  signatoryDesignation: c.signatoryDesignation,
   upiId: c.upiId,
   qrImageUrl: c.qrImageUrl,
   bankName: c.bankName,
@@ -112,6 +118,8 @@ export const parseCompanyBody = (body: Record<string, unknown>): CompanyWriteDat
     phone: orNull(optionalString(body.phone, "phone", 40)),
     email: orNull(optionalString(body.email, "email", 200)),
     signatureUrl: orNull(optionalString(body.signatureUrl, "signatureUrl", 1000)),
+    signatoryName: orNull(optionalString(body.signatoryName, "signatoryName", 120)),
+    signatoryDesignation: orNull(optionalString(body.signatoryDesignation, "signatoryDesignation", 120)),
     upiId: orNull(optionalString(body.upiId, "upiId", 200)),
     qrImageUrl: orNull(optionalString(body.qrImageUrl, "qrImageUrl", 1000)),
     bankName: orNull(optionalString(body.bankName, "bankName", 200)),

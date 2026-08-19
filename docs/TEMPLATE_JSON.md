@@ -258,7 +258,7 @@ customer.*   name, gstin, phone, email, addressLine1/2, city, state, stateCode, 
 invoice.*    number, date, dueDate, currency, subtotal, tax, discount, total, notes, status
 items[]      description, hsnSac, quantity, unitPrice, taxRate, amount
 payment.*    upi, qr, bankName, accountNumber, ifsc
-signature.url
+signature.*  url, name, designation
 ```
 
 The concrete data the client binds these against comes from the invoice and its company/customer

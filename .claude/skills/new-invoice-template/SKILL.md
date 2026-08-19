@@ -149,7 +149,8 @@ company.*   name gstin addressLine1/2 city state stateCode pincode country phone
 customer.*  name gstin phone email addressLine1/2 city state stateCode pincode
 invoice.*   number date dueDate currency subtotal tax discount total notes status
 items[]     description hsnSac quantity unitPrice taxRate amount
-payment.*   upi qr bankName accountNumber ifsc      signature.url
+payment.*   upi qr bankName accountNumber ifsc
+signature.* url name designation
 ```
 **Repeat/conditional:** `data-repeat="items as item"` on the `<tbody>`'s `<tr>` (one repeat row per
 table, no static rows alongside it); `data-if="payment.upi"` renders an element only when the path is

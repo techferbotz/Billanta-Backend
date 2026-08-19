@@ -134,6 +134,10 @@ model Company {
 
   // Payment details shown on the invoice so a customer can pay.
   signatureUrl      String?
+  // The authorised signatory printed beside the signature image (BE-012). Templates bind these
+  // as signature.name / signature.designation; the image is signature.url (signatureUrl).
+  signatoryName         String?
+  signatoryDesignation  String?
   upiId             String?
   qrImageUrl        String?
   bankName          String?
