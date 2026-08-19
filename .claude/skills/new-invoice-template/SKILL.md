@@ -1,17 +1,21 @@
 ---
 name: new-invoice-template
 description: >-
-  Generate a production-quality Billanta invoice template from a short brief and publish it live via
-  the admin API. Use when the user wants to create, generate, design, or add a NEW invoice template
-  (e.g. "/new-invoice-template modern, teal accent, premium", "make a new invoice template like X",
-  "add a premium template"). Produces authored HTML+CSS in Billanta's compiler subset, hard-verifies
-  it compiles and is fully themed, then publishes it to the running backend. NOT for editing app
-  UI/screens, and NOT for the app-side render code — this is the backend template pipeline only.
+  Generate a production-quality Billanta invoice template — from a short text brief OR by reproducing
+  a reference invoice the user supplies as a PDF or image — and publish it live via the admin API. Use
+  when the user wants to create, generate, design, add, or REPRODUCE an invoice template (e.g.
+  "/new-invoice-template modern, teal accent, premium", "make a template like this invoice.pdf",
+  "recreate this invoice as a template"). Reads a reference invoice, identifies its sections
+  (billed-from / billed-to, items, totals, payment, bank, notes, terms, …), decides which are hidable
+  and which colours are theme-changeable, then produces HTML+CSS in Billanta's compiler subset,
+  hard-verifies it compiles and is fully themed, and publishes it. NOT for editing app UI/screens, and
+  NOT for the app-side render code — this is the backend template pipeline only.
 ---
 
 # New invoice template
 
-Generate a **production-quality** Billanta invoice template and publish it live.
+Generate a **production-quality** Billanta invoice template and publish it live — either from a text
+**brief** or by **reproducing a reference invoice** (a PDF or image the user provides).
 
 The output is authored **HTML + CSS** in Billanta's strict compiler subset. The backend compiles it
 to Billanta Template JSON; the Android app renders that JSON and **never** renders HTML — so HTML/CSS
@@ -27,22 +31,83 @@ here is an *authoring language*, not a runtime. A template you generate MUST:
 
 ---
 
-## Step 0 — The brief
+## Step 0 — The input: a brief, or a reference invoice
 
-Infer these from the user's request; pick tasteful defaults for anything unstated and say what you
-chose (don't block on questions):
+The skill takes EITHER:
 
-| input | notes |
-| --- | --- |
-| style / vibe | "modern minimalist", "classic corporate", "bold coloured header", "elegant serif"… |
-| accent colour | one brand hex. Used purposefully (header fill, or title + the totals rule) — not everywhere. |
-| free / **premium** | premium templates are gated (only premium users can download the tree). Default free. |
-| name + slug | display name ("Coastal") + lowercase slug (`coastal`, `a-z 0-9 -`). Derive if unstated. |
-| category | "Business", "Minimal", "Premium", … |
+- **A text brief** — infer sensible defaults for anything unstated and say what you chose; don't block.
+
+  | input | notes |
+  | --- | --- |
+  | style / vibe | "modern minimalist", "classic corporate", "bold coloured header", "elegant serif"… |
+  | accent colour | one brand hex. Used purposefully (header fill, or title + the totals rule) — not everywhere. |
+  | free / **premium** | premium templates are gated (only premium users can download the tree). Default free. |
+  | name + slug | display name ("Coastal") + lowercase slug (`coastal`, `a-z 0-9 -`). Derive if unstated. |
+  | category | "Business", "Minimal", "Premium", … |
+
+- **A reference invoice** — a PDF or image to reproduce as a themeable template. Do **Step 0b** first,
+  then design from the plan it produces. (Still infer name/slug/category and free-vs-premium as above —
+  ask only if the user cares.)
+
+## Step 0b — Analyse a reference invoice (only when given a PDF or image)
+
+**Read it.** Use the Read tool on the file path — it renders images directly, and PDF pages via the
+`pages` parameter (an invoice is 1–2 pages). If the user pasted the image into the chat, analyse it in
+place. Study the WHOLE invoice: layout, every block, the colours, the type.
+
+Then produce a short **reconstruction plan** and show it to the user before authoring — this publishes
+live, so a reproduction gets a quick confirmation first.
+
+**1. Layout & type.** One- or two-column header? Boxed or borderless item table? Totals in a right-hand
+panel or the table footer? Which of the five bundled fonts (Inter, Roboto, Open Sans, Lato, Montserrat)
+is closest to the reference's face? You are reproducing the **structure and feel within the compiler
+subset**, not pixel-copying: anything unsupported (gradients, background images, icons, multiple
+typefaces, absolute positioning, watermarks) is simplified to the nearest supported equivalent or
+dropped.
+
+**2. Sections — map every block to a Billanta section id.** The id decides the editor it opens and
+**whether it can be hidden** (you don't choose hidability freely — it follows the id):
+
+  | reference block (any wording) | `data-section` | edits | hidable |
+  | --- | --- | --- | --- |
+  | seller — "From" / "Billed From" / logo + company at top, with the invoice no./date/due | `header` | invoiceDetails | no |
+  | buyer — "Bill To" / "Billed To" / "Ship To" / customer | `parties` | customer | no |
+  | the line-item table | `items` | items | no |
+  | subtotal / tax / grand total | `totals` | discount | no |
+  | "Payment" / UPI / "Pay to" / **bank account** (A/C no., IFSC) | `payment` | company | **yes** |
+  | "Notes" / remarks | `notes` | notes | **yes** |
+  | signature / "Authorised signatory" | `signature` | company | **yes** |
+  | "Terms" / "Terms & Conditions" | `terms` | none | **yes** |
+
+  - Tag each top-level block `data-section="<id>"`. Structural blocks (header, parties, items, totals)
+    are never hidable; the optional ones (payment, notes, signature, terms) are.
+  - **Bank details live inside `payment`** — don't invent a new section for them.
+  - If the totals sit in the item-table footer, tag the grand-total `<tr>` `data-section="totals"`.
+  - The **invoice-number structure** (e.g. "INV-2025-014") is DATA, not markup — bind it as
+    `{{ invoice.number }}`; the prefix/sequence is the user's `Settings`, never hard-coded in the
+    template. Same for date/due (`{{ invoice.date | date }}`, `{{ invoice.dueDate | date }}`).
+
+**3. Dynamic colours — decide what to tokenise.** Pick the reference's **brand** colour(s) — the header
+fill, the title, the table-header fill, the rule above the totals, section headings — and make those a
+`theme` token: `accent` at minimum, plus `secondary` if the invoice clearly uses two brand colours.
+Sample an approximate hex from the image. **Do NOT tokenise body ink or greys** — leave readable text a
+fixed colour so a user's override can never make the invoice unreadable. In the plan, list each colour
+you'll tokenise and which element carries it.
+
+**4. Optional fields → conditionals.** Anything that can be absent — GSTIN, due date, a discount line,
+notes, the bank block, the whole payment block — gate with `data-if`, and pair each with a
+`data-unless` editor-only empty state (Step 3b). This is how "which fields/sections are optional"
+becomes real behaviour rather than a guess.
+
+**5. Data → bindings.** Replace EVERY literal value in the reference (company name, address, the item
+rows, the amounts, the invoice number) with a binding from the namespace in Step 2. A reconstructed
+template must contain **none** of the sample invoice's real data — only bindings.
 
 ## Step 1 — Design a real invoice (production quality)
 
-Not a demo. Compose, top to bottom:
+If you analysed a reference (Step 0b), **reproduce its plan** — its layout, section map, fonts and
+tokenised colours; otherwise **design fresh** from the brief. Either way it's a real invoice, not a
+demo — compose, top to bottom:
 
 - **Header** — company logo (`<img src="{{ company.logo }}">`), name, GSTIN, and the invoice
   number / date / due date.
@@ -94,7 +159,8 @@ drops from every export.
 
 ## Step 3 — Theme it fully (this is what makes it production quality)
 
-Declare a colour token and apply it to **every** element drawn in that colour, or verify will reject it.
+Declare a colour token — the `accent` (and `secondary`) you identified from the reference, or the
+brief's accent — and apply it to **every** element drawn in that colour, or verify will reject it.
 
 - **Colour tokens** — tag an element `data-token="styleKey:tokenName"` (declare `accent` at minimum).
   The token's default colour is read from that element's resolved style, so tag an element that
@@ -208,3 +274,6 @@ appears in `GET /templates`.
 - The admin key is a secret: fetch it into an env var, never echo it or write it to a file.
 - Publishing makes the template **immediately visible** to app users. If the brief is experimental,
   offer to publish it as `--premium` (gated) or to stop at Step 5 for review.
+- **Reproducing a reference:** show the Step 0b reconstruction plan AND the Step 5 preview and get a
+  quick nod before publishing — a reproduction is easy to get subtly wrong, and it goes live. Never
+  carry over the sample invoice's real data, and never copy unsupported visuals literally.

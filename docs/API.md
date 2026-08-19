@@ -18,8 +18,9 @@ Base URL: your deployment origin (e.g. `https://api.billanta.example`). All exam
 - **Client-generated ids.** Invoices, customers and products accept a client uuid `id`; writes are
   idempotent by `(userId, id)`.
 
-Common errors: `401` (missing/expired token), `404` (missing or not-yours), `409` (duplicate id or
-number), `503` (media when S3 unconfigured).
+Common errors: `401` (missing/expired token — or `code: "ACCOUNT_NOT_FOUND"` when the token is valid
+but its account no longer exists: re-run `POST /auth/google`, not a refresh), `404` (missing or
+not-yours), `409` (duplicate id or number), `503` (media when S3 unconfigured).
 
 ---
 
