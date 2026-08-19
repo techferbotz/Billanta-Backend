@@ -80,6 +80,61 @@ Revokes the presented refresh token. Always `200` (silent about unknown tokens).
 - `PUT /company` — **full replace**; `name` required, all other fields optional (omitting one
   clears it). A valid `gstin` derives/validates `stateCode`. → the saved company.
 
+**The exact JSON body** — what `GET /company` returns and `PUT /company` accepts. ⚠️ These REST field
+names are the **wire contract**. They are NOT the template binding-namespace leaves
+(`company.signature`, `company.accountNumber`, …) — the client assembles the render context *from*
+these, renaming several. Because `PUT` is a full replace, sending a key the server doesn't recognise
+**silently clears that field** (it reads as omitted). A fully-populated profile:
+
+```json
+{
+  "id": "b1f2c3d4-…",
+  "name": "Ferbotz Innovations Private Limited",
+  "logoUrl": "https://cdn.example/logo.webp",
+  "logoThumbnailUrl": "https://cdn.example/logo-thumb.webp",
+  "gstin": "29ABCDE1234F1Z5",
+  "stateCode": "29",
+  "addressLine1": "1 MG Road",
+  "addressLine2": "Indiranagar",
+  "city": "Bengaluru",
+  "state": "Karnataka",
+  "pincode": "560038",
+  "country": "India",
+  "phone": "+91 98765 43210",
+  "email": "hello@ferbotz.com",
+  "signatureUrl": "https://cdn.example/sign.webp",
+  "signatoryName": "Vishal B",
+  "signatoryDesignation": "Director",
+  "upiId": "ferbotz@okhdfc",
+  "qrImageUrl": "https://cdn.example/qr.webp",
+  "bankName": "HDFC Bank",
+  "bankAccountNumber": "50100123456789",
+  "bankIfsc": "HDFC0001234",
+  "createdAt": "2026-08-19T09:00:00.000Z",
+  "updatedAt": "2026-08-19T09:00:00.000Z"
+}
+```
+
+`id`, `createdAt`, `updatedAt` are server-set (present in responses, ignored on `PUT`). Every field
+except `name` is optional; `country` defaults to `"India"`. String fields are length-capped
+(`name`≤200, addresses≤300, `phone`≤40, `bankAccountNumber`≤60, `signatoryName`/`signatoryDesignation`≤120,
+url fields≤1000) — an over-long value is a `400`.
+
+**REST field ⇄ template binding path** — the confusable ones (names differ on purpose; a mismatch is
+the APP-011 data-loss class):
+
+| `/company` REST field | template binding path(s) |
+| --- | --- |
+| `logoUrl` | `company.logo` |
+| `signatureUrl` | `company.signature`, `signature.url` |
+| `signatoryName` | `signature.name` |
+| `signatoryDesignation` | `signature.designation` |
+| `qrImageUrl` | `company.qr`, `payment.qr` |
+| `bankAccountNumber` | `company.accountNumber`, `payment.accountNumber` |
+| `bankIfsc` | `company.ifsc`, `payment.ifsc` |
+| `upiId` | `company.upiId`, `payment.upi` |
+| `bankName` | `company.bankName`, `payment.bankName` |
+
 ## Settings (auth)
 
 - `GET /settings` → the user's settings (auto-created with defaults on first call).
@@ -209,15 +264,22 @@ with a small size cap); a missing value means "template defaults". Both are also
 
 ## Media (auth)
 
-`POST /media` — `multipart/form-data` field **`file`** (an image). Compressed to WebP in two sizes
-and uploaded to S3.
+`POST /media` — `multipart/form-data`, single field **`file`** (an image). Compressed to WebP in two
+sizes and uploaded to S3.
 ```json
 // 201
 { "success": true, "data": { "url": "https://…/full.webp", "thumbnailUrl": "https://…/thumb.webp",
   "contentType": "image/webp" } }
 ```
+- **Accepted input:** any `image/*` MIME type. Decoded server-side via sharp; the current build decodes
+  **JPEG, PNG, WebP, GIF, TIFF, HEIC/HEIF, SVG**. A safe client-side allow-list is `image/jpeg`,
+  `image/png`, `image/webp`, and `image/heic`/`image/heif` (iOS). A non-`image/*` type is a `400`.
+- **Size cap:** **8 MB**; a larger file is a `400`. One file per request.
+- **Output:** always `contentType: "image/webp"` — a full image (≤1280 px, quality 75) plus a thumbnail
+  (≤512 px, quality 60). Both `url` and `thumbnailUrl` are public S3 URLs. The **input** format/size are
+  not echoed; the client only gets the two WebP URLs back.
+
 `503` `Media storage is not configured` when S3 env is unset (the rest of the app still works).
-`400` for a non-image or an oversized (> 8 MB) file.
 
 ---
 

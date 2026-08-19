@@ -264,6 +264,13 @@ signature.*  url, name, designation
 The concrete data the client binds these against comes from the invoice and its company/customer
 **snapshots** (captured at issue time), so an invoice re-renders identically forever.
 
+> **These are template render paths, not `/company` REST field names.** The client assembles this
+> namespace from the stored profile and renames several leaves: `company.logo` ← `logoUrl`,
+> `company.signature` / `signature.url` ← `signatureUrl`, `company.accountNumber` ← `bankAccountNumber`,
+> `company.ifsc` ← `bankIfsc`, `company.qr` ← `qrImageUrl`. When reading or writing `GET`/`PUT /company`
+> use the **REST** field names — see [API.md § Company](API.md). (`signature.name`/`signature.designation`
+> map to `signatoryName`/`signatoryDesignation`.)
+
 ## Determinism
 
 The same HTML+CSS always compiles to a **byte-identical** tree with an identical `sha256`
