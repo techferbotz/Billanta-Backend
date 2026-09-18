@@ -14,6 +14,7 @@ import adminRoutes from "./modules/admin/admin.routes";
 import invoiceRoutes from "./modules/invoice/invoice.routes";
 import productRoutes from "./modules/product/product.routes";
 import legalRoutes from "./modules/legal/legal.routes";
+import remoteConfigRoutes from "./modules/remoteConfig/remoteConfig.routes";
 
 const app = express();
 
@@ -32,6 +33,15 @@ app.get("/", (_req, res) => {
 // privacy / terms / delete-account (+ aliases). No auth — Google Play's crawler and the app's
 // own links must reach them. Mounted before the authenticated feature routes.
 app.use(legalRoutes);
+
+// --- Remote config ----------------------------------------------------------------
+// GET /config — the app's behaviour switches (feature kill switches, update policy, limits,
+// legal links), read on every cold start. Deliberately mounted up here with the other public
+// routes: nothing about the caller is required, so a first launch that has never signed in
+// still gets a document. Its router applies optionalAuth, so a token is USED when present —
+// it is a targeting input for future rules. Never touches the database.
+// See docs/REMOTE_CONFIG.md and HOA protocol 10.
+app.use("/config", remoteConfigRoutes);
 
 // --- Feature routes ---------------------------------------------------------------
 app.use("/auth", authRoutes); // public: sign in, rotate, log out

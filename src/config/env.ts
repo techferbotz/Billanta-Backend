@@ -16,6 +16,24 @@ const requireEnv = (key: string): string => {
   return value;
 };
 
+// Parses an OPTIONAL env var holding a JSON object. Unset/blank -> null. Invalid JSON or a
+// non-object -> throw, so a mistyped value fails the boot (like requireEnv) instead of being
+// quietly ignored.
+const parseJsonObjectEnv = (key: string): Record<string, unknown> | null => {
+  const raw = process.env[key];
+  if (!raw || !raw.trim()) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Environment variable ${key} is not valid JSON: ${(err as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Environment variable ${key} must be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
+};
+
 // Centralized, typed configuration. Import this instead of reading process.env
 // directly — nothing else in the codebase may touch process.env.
 export const config = {
@@ -61,4 +79,11 @@ export const config = {
   // Unset => panel login is disabled (the authoring API still works with the key).
   adminPanelUser: process.env.ADMIN_PANEL_USER || null,
   adminPanelPassword: process.env.ADMIN_PANEL_PASSWORD || null,
+
+  // Optional JSON patch applied over the default remote config (GET /config) for every caller,
+  // e.g. {"maintenance":{"enabled":true,"message":"Back in 10 minutes"}}. Lets ops flip a flag
+  // with an .env change + container recreate — no code deploy. Every key must exist in
+  // DEFAULT_REMOTE_CONFIG with a matching type; anything else fails startup on purpose
+  // (validated in remoteConfig.service.ts). See docs/REMOTE_CONFIG.md.
+  remoteConfigOverrides: parseJsonObjectEnv("REMOTE_CONFIG_OVERRIDES"),
 };

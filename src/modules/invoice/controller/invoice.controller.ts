@@ -8,6 +8,7 @@ import { optionalUuid, requireObjectBody } from "../../../common/validation";
 import { invoiceService, InvoiceStatusFilter } from "../service/invoice.service";
 import { parseInvoiceInput, parseInvoicePatch, parseDeleteTime, ParsedInvoiceInput } from "../dto/invoice.dto";
 import { decodeSyncCursor } from "../syncCursor";
+import { MAX_SYNC_BATCH_INVOICES } from "../invoice.constants";
 
 const parseStatusFilter = (raw: unknown): InvoiceStatusFilter | undefined => {
   if (raw === undefined || raw === "") return undefined;
@@ -66,8 +67,10 @@ export const syncInvoices = async (req: Request, res: Response): Promise<void> =
   if (!Array.isArray(body.invoices)) {
     throw new BadRequestError('"invoices" must be an array');
   }
-  if (body.invoices.length > 500) {
-    throw new BadRequestError("a sync batch may contain at most 500 invoices");
+  if (body.invoices.length > MAX_SYNC_BATCH_INVOICES) {
+    throw new BadRequestError(
+      `a sync batch may contain at most ${MAX_SYNC_BATCH_INVOICES} invoices`
+    );
   }
 
   // Parse each push individually: a single malformed invoice must NOT fail the whole batch (an

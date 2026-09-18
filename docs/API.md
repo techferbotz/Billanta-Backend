@@ -35,6 +35,64 @@ not-yours), `409` (duplicate id or number), `503` (media when S3 unconfigured).
 
 ---
 
+## Remote config
+
+### `GET /config`
+The behaviour switches the app reads **on every cold start**: feature kill switches, update
+policy, maintenance, the caps to respect, the legal links. Changing them needs no app release.
+
+**Nothing about the caller is required** — no token, no headers, no query string. It never touches
+the database, so it answers even when Postgres is down. Full design + how to change a value:
+[`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
+
+Optional request headers (the targeting inputs — send them on **every** request, not just this
+one; a garbled value is treated as absent, never a `400`):
+
+```
+X-App-Platform: android        # "android" | "ios" | "web"
+X-App-Version: 1.4.2           # display version string
+X-App-Build: 1042              # INTEGER build number / versionCode — what version rules compare
+X-Device-Id: <install uuid>    # stable per-install id — the experiment-bucketing key
+Authorization: Bearer <jwt>    # when signed in — enables per-user overrides
+```
+
+```json
+// 200 — Cache-Control: no-store
+{ "success": true, "data": {
+  "schemaVersion": 1,
+  "variant": "default",
+  "revision": "bee4d118f4d4",
+  "ttlSeconds": 3600,
+  "config": {
+    "features": { "googleLogin": true, "cloudSync": true, "templateStore": true,
+                  "premiumTemplates": true, "productCatalogue": true, "mediaUpload": true },
+    "update": { "minSupportedBuild": 0, "recommendedBuild": 0, "androidStoreUrl": null,
+                "iosStoreUrl": null, "message": null },
+    "maintenance": { "enabled": false, "message": null },
+    "limits": { "maxMediaBytes": 8388608, "maxSyncBatchInvoices": 500, "maxPageSize": 100 },
+    "links": { "privacyPolicy": "https://billanta.ferbotz.com/privacy",
+               "terms": "https://billanta.ferbotz.com/terms",
+               "deleteAccount": "https://billanta.ferbotz.com/delete-account",
+               "supportEmail": "vishalb250601@gmail.com" }
+  }
+} }
+```
+
+- `schemaVersion` is bumped **only** when a key is removed or renamed — adding one never bumps it.
+  `variant` names the targeting rules that applied (`"default"` when none did); `revision` is a
+  fingerprint of `config` that changes whenever any value does; `ttlSeconds` is how long the
+  client may reuse the document.
+- **The client must ignore unknown keys and default missing ones leaf by leaf** — new keys appear
+  without an app release. Never default a whole section.
+- `update.*Build` are compared against the **integer** build number, never the version string.
+  `0` = no requirement, and an unknown build is never blocked.
+- `features.*` gate **UI entry points only**; the API routes keep working.
+- `limits.*` mirror what the server enforces (`POST /media` 8 MB, ≤ 500 invoices per sync push,
+  `?limit` ≤ 100) — check them before calling, don't retype them.
+- `links.*` are absolute: use them instead of hard-coding the host.
+
+---
+
 ## Auth (public)
 
 ### `POST /auth/google`

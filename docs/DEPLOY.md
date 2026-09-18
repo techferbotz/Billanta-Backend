@@ -134,6 +134,28 @@ docker compose -f docker-compose.prod.yml up -d --build app
 Isolation: the stack is named `billanta` (containers/network are `billanta_*`), the app publishes
 only on `127.0.0.1`, and it runs no Postgres — so it can safely share a box with other projects.
 
+### Changing only `.env` — recreate, don't rebuild
+
+Env is read at process start, so a `.env` edit needs a **recreate**, not a rebuild:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d app
+```
+
+That is how a remote-config switch is flipped without a code deploy — set
+`REMOTE_CONFIG_OVERRIDES` to a JSON patch of the document and recreate:
+
+```bash
+# one line, no quotes around the JSON
+echo 'REMOTE_CONFIG_OVERRIDES={"maintenance":{"enabled":true,"message":"Back in 10 minutes"}}' >> .env
+docker compose -f docker-compose.prod.yml up -d app
+curl -s https://billanta.ferbotz.com/config | head -c 400
+```
+
+The container **refuses to start** on a bad patch, naming the path
+(`REMOTE_CONFIG_OVERRIDES.features.nope: unknown key`). To undo: remove the line, `up -d app`
+again. See [`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
+
 ## 7. Before launch — legal pages
 
 The pages at `/privacy`, `/terms` and `/delete-account` are **templates**. Have them reviewed by a
@@ -151,3 +173,6 @@ Privacy Policy and Account Deletion URLs.
 - **"No pending migrations" after a schema change** — you forgot `--build` on the migrate step.
 - **`prisma generate` EPERM on a dev box (Windows)** — a stray `ts-node-dev` is holding the query
   engine DLL; stop it and retry.
+- **The app won't start after an `.env` edit** — by design, it is one of two things: a missing
+  required variable, or an invalid `REMOTE_CONFIG_OVERRIDES`. Both name themselves in
+  `docker compose -f docker-compose.prod.yml logs --tail=30 app`.

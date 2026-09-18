@@ -21,6 +21,7 @@
     "check:phase4": "ts-node src/scripts/checkPhase4Pipeline.ts",
     "check:money": "ts-node src/scripts/checkMoney.ts",
     "check:phase5": "ts-node src/scripts/checkPhase5Pipeline.ts",
+    "check:config": "ts-node src/scripts/checkRemoteConfig.ts",
     "test": "echo \"No test framework — use `npm run typecheck` plus the scripts in scripts/\" && exit 1"
   },
   "keywords": [],

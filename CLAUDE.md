@@ -4,7 +4,8 @@
 > Deeper docs live in [`docs/`](docs/): [`API.md`](docs/API.md) (every endpoint),
 > [`TEMPLATE_AUTHORING.md`](docs/TEMPLATE_AUTHORING.md) (the HTML/CSS subset for designers),
 > [`TEMPLATE_JSON.md`](docs/TEMPLATE_JSON.md) (the render-tree contract the Android app is built
-> against), [`MONEY.md`](docs/MONEY.md) (the calculation spec the client mirrors), and
+> against), [`MONEY.md`](docs/MONEY.md) (the calculation spec the client mirrors),
+> [`REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md) (the `GET /config` behaviour switches), and
 > [`DEPLOY.md`](docs/DEPLOY.md) (the EC2 runbook).
 
 ## What this is
@@ -95,6 +96,7 @@ npm run check:phase3v       # company/settings/customer validation
 npm run check:compiler      # template compiler: structure, determinism, exact-location rejects
 npm run check:seeds         # every seed template compiles deterministically
 npm run check:money         # invoice calculation fixtures (exact paise)
+npm run check:config        # remote config: strict merge, header parsing, resolve order, fail-fast
 npm run check:phase3        # cross-user isolation           (needs DB + running server)
 npm run check:phase4        # template authoring→serving      (needs DB + running server)
 npm run check:phase5        # invoice CRUD + recompute + sync (needs DB + running server)
@@ -115,6 +117,8 @@ Required (the app **fails fast on startup** if any are missing — `src/config/e
 - `ADMIN_API_KEY` — bearer key for the `/admin` authoring API
 
 Optional: `PORT` (3000), `ACCESS_TOKEN_TTL` (15m), `REFRESH_TOKEN_TTL_DAYS` (60),
+`REMOTE_CONFIG_OVERRIDES` (a JSON *patch* over the `GET /config` document, applied to every
+caller — the no-deploy kill switch; an unknown key or wrong type **fails startup** on purpose),
 `S3_BUCKET` + `AWS_REGION` + `S3_PUBLIC_BASE_URL` (media; unset ⇒ `POST /media` returns 503 and
 everything else works), `ADMIN_PANEL_USER` + `ADMIN_PANEL_PASSWORD` (the `/admin` panel login).
 **Nothing reads `process.env` except `config`; never hardcode a secret.**
@@ -136,6 +140,7 @@ src/
     middleware/                 # auth (required + optional), adminAuth (constant-time key), upload (multer), requestLogger
     utils/                      # asyncHandler, jwt (access + refresh helpers), getUserId
     pagination.ts               # cursor pagination { items, nextCursor, hasMore }
+    deepMerge.ts                # deepMergeStrict: patch must fit the base's shape, or it throws
     validation.ts               # shared input validators (string/number/currency/uuid/decimal/…)
     gstin.ts                    # GSTIN checksum + state-code reconciliation
     money.ts                    # THE calculation module (see docs/MONEY.md). Pure; decimal.js; never floats
@@ -150,6 +155,7 @@ src/
     seed/seedTemplates.ts       # 3 starter templates (also the authoring examples)
   modules/                      # feature modules: routes → controller → service → repository → dto
     auth/ user/ company/ settings/ customer/ invoice/ template/ media/ admin/ legal/
+    remoteConfig/               # GET /config — defaults + env overrides + targeting rules; no DB
   scripts/                      # the check:* verification scripts
 docker-compose.yml              # dev (includes postgres:16)
 docker-compose.prod.yml         # prod (NO postgres; host DB via host.docker.internal; migrate under profile "tools")
@@ -174,6 +180,11 @@ Dockerfile                      # multi-stage builder + runner (non-root)
   soft-delete `deletedAt` tombstone.
 - **Money is never a float.** Integer paise in `BigInt` columns, serialized as **strings**; all
   arithmetic goes through `src/common/money.ts` (decimal.js, half-up). See [`docs/MONEY.md`](docs/MONEY.md).
+- **The remote config document is additive-only.** `GET /config` is what lets us change app
+  behaviour without a release, and it only works because clients ignore keys they don't know and
+  default the ones they're missing. Adding a key is free; removing or renaming one breaks old
+  builds — bump `SCHEMA_VERSION` and prefer adding. Numbers the server enforces are **imported**
+  into the defaults, never retyped. HOA protocol 10; see [`docs/REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md).
 - **Published template versions are immutable.** Editing publishes a NEW version — which is what
   lets clients cache a compiled tree by `(templateId, version)` forever.
 
@@ -210,3 +221,6 @@ Dockerfile                      # multi-stage builder + runner (non-root)
 5. **Invoices** — the money module (BigInt paise, decimal.js, half-up, togglable discount timing),
    `Invoice`/`InvoiceItem`, server-recompute CRUD + search, and `/invoices/sync` (LWW + tombstones).
 6. **Legal pages + docs** — public privacy/terms/delete-account pages; this docs set.
+7. **Remote config** — `GET /config`: the behaviour switches the app reads at launch (feature kill
+   switches, update policy, maintenance, mirrored limits, legal links), resolved from defaults +
+   `REMOTE_CONFIG_OVERRIDES` + an (empty) targeting-rule registry. Pure, synchronous, no DB.

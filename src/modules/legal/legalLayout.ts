@@ -9,6 +9,10 @@ export const LEGAL = {
   company: "Billanta",
   contactEmail: "vishalb250601@gmail.com",
   effectiveDate: "25 July 2026",
+  // The public origin these pages are served from. Absolute URLs built from it are handed to
+  // the app in the remote config (`links.*` — see docs/REMOTE_CONFIG.md), so the app never
+  // hard-codes the API host and the pages can move without a release. No trailing slash.
+  appUrl: "https://billanta.ferbotz.com",
 };
 
 export const legalPage = (title: string, bodyHtml: string): string => `<!doctype html>
