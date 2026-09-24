@@ -43,8 +43,10 @@ handler attributes (`onclick`, any `on*`) are rejected. Nesting deeper than 200 
 `color`, `font-size`, `font-weight`, `font-style`, `font-family`, `line-height`, `text-align`,
 `text-transform`, `letter-spacing`, `overflow`, `vertical-align`, `opacity`.
 
-**Rejected:** animations, transitions, transforms, filters, `float`, `position`, media queries,
-pseudo-classes/elements, `calc()`, external fonts, and any `url(...)` / external resource.
+**Rejected:** animations, transitions, transforms, filters, `float`, `position`, `box-sizing`, media
+queries, pseudo-classes/elements, `calc()`, external fonts, and any `url(...)` / external resource.
+Sizing is always **content-box** (CSS's default): a `width` is the content width, and padding and
+border are added outside it — see [Tips](#tips).
 
 **Selectors:** tag (`td`), class (`.total`), id (`#footer`), descendant (`.items td`) and child
 (`.items > tr`) combinators, and comma lists (`h1, h2`). Rejected: `*`, `:hover`, `::before`,
@@ -60,9 +62,10 @@ Inheritable text properties (`color`, `font-*`, `line-height`, `text-align`, `le
 **Colors:** hex (`#1a1a1a`, `#f00`, `#rrggbbaa`), `rgb()`/`rgba()`, or a named color from the
 common set (black, white, gray, red, blue, …). Everything is normalized to canonical hex.
 
-**Fonts:** `font-family` must be one of the app-bundled fonts — **Inter, Roboto, Open Sans, Lato,
-Montserrat** — or a generic (`sans-serif`, which maps to Inter). Any other family is rejected, so
-the printed invoice never silently changes face.
+**Fonts:** `font-family` must be one of **Inter, Roboto, Open Sans, Lato, Montserrat**, or a generic
+(`sans-serif`, which maps to Inter). Any other family is rejected. **Today the app draws every
+template in Inter**, whatever font the template names (APP-013). Only the picker thumbnail shows
+the other faces. Design in Inter if you want the thumbnail and the printed invoice to match.
 
 ## Bindings
 
@@ -130,7 +133,7 @@ signature.url
 ## Worked examples
 
 Three complete, compilable templates ship in
-[`src/templates/seed/seedTemplates.ts`](../src/templates/seed/seedTemplates.ts):
+`src/templates/seed/seedTemplates.ts` (in the backend repo):
 
 - **`classic`** — a conventional business invoice with a boxed items table, a payment block, and
   numbered terms.

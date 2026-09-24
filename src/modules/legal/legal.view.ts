@@ -11,8 +11,11 @@ import { config } from "../../config/env";
  *                         Settings, RefreshToken) and POST /media (images only, never PDFs)
  *   - processors        = Google (Sign-In; ferbotz.com mail is Google Workspace) and AWS (EC2 host
  *                         + database, S3 media — region ap-south-1, Mumbai)
- *   - deletion          = DELETE /users/me cascades every user-owned table; it does NOT touch S3,
- *                         so uploaded images survive it (disclosed on purpose — see below)
+ *   - deletion          = the ONLY user-facing route is email (APP-013: the app has in-app deletion
+ *                         built but hidden). The operator runbook (docs/DEPLOY.md) removes the S3
+ *                         images under media/<userId>/ and then the User row, which cascades every
+ *                         user-owned table. DELETE /users/me does the cascade but NOT the images —
+ *                         it matters again the day the in-app row ships (see IN-APP DELETION below)
  *   - soft deletes      = invoices are tombstoned (deletedAt) for sync; customers/products are
  *                         hard-deleted
  *   - logs              = nginx access log (IP, time, request line, status, user agent), rotated
@@ -64,11 +67,15 @@ export const LEGAL_PATHS = {
   deleteAccount: "/delete-account",
 } as const;
 
-// The in-app deletion route, rendered as numbered steps. Play reviewers follow these literally,
-// so they must name the screens the SHIPPED app has. TODO(app): unconfirmed by the app side —
-// BE-015 asks the app to build exactly this path (calling DELETE /users/me) or to send an APP-nnn
-// with its real path, and this constant changes to match.
-export const IN_APP_DELETE_PATH = ["Settings", "Account", "Delete account"] as const;
+// IN-APP DELETION: not offered yet. The app has the flow built (confirmation screen ->
+// DELETE /users/me -> local sign-out) but hidden by a product decision (APP-013, 2026-09-24), so the
+// delete-account page gives only the email route. Play reviewers follow the page literally, so it
+// must never name a screen the shipped app doesn't show. When a later APP entry says the row ships,
+// the path will be Profile -> Settings -> Account -> Delete account. Then:
+//   - add those steps to renderDeleteAccount (git history: b1da0d3 had an "Option 1" layout);
+//   - restore the caveat that in-app deletion keeps uploaded images, because DELETE /users/me does
+//     not touch S3 (unless media cleanup has landed by then);
+//   - update the privacy policy's Rights/Retention wording and `npm run check:legal`.
 
 /** Shared HTML shell: self-contained (inline CSS, no scripts, fonts or external assets), light theme. */
 const renderLegalPage = (title: string, lastUpdated: string, body: string): string => `<!DOCTYPE html>
@@ -210,10 +217,8 @@ export const renderPrivacyPolicy = (): string => {
       <li><strong>Sign-in sessions</strong> expire after ${SESSION_LIFETIME_DAYS} days. A record of each
         session (a one-way scrambled copy of its token, its expiry date, and your device&rsquo;s user
         agent) is kept until you delete your account.</li>
-      <li><strong>Images you upload</strong>, including earlier ones you replaced, are kept until you ask
-        us to remove them. They are <strong>not</strong> removed automatically when you delete your
-        account &mdash; see <a href="${LEGAL_PATHS.deleteAccount}">Delete your account</a> for how to
-        have them removed.</li>
+      <li><strong>Images you upload</strong>, including earlier ones you replaced, are kept until you
+        delete your account or ask us to remove them.</li>
       <li><strong>Web server records</strong> are kept for ${SERVER_LOG_RETENTION_DAYS} days and then
         deleted automatically. Our app server also keeps a basic record of requests (the address
         requested, the result and the timing &mdash; no IP address), which is cleared each time we
@@ -240,8 +245,9 @@ export const renderPrivacyPolicy = (): string => {
     <ul>
       <li><strong>see and correct</strong> your information in the app &mdash; your edits sync to our
         copy;</li>
-      <li><strong>delete</strong> individual customers, products and invoices, or your whole account,
-        from inside the app;</li>
+      <li><strong>delete</strong> individual customers, products and invoices from inside the app, and
+        your whole account by emailing us &mdash; see
+        <a href="${LEGAL_PATHS.deleteAccount}">Delete your account</a>;</li>
       <li><strong>stop syncing</strong> by signing out &mdash; this stops new data reaching us, but does
         not delete what we already hold;</li>
       <li><strong>ask us</strong> for a copy of your information, to correct or erase it, or to remove
@@ -407,14 +413,6 @@ export const renderTermsAndConditions = (): string => {
   return renderLegalPage(`${app} Terms &amp; Conditions`, TERMS_EFFECTIVE_DATE, body);
 };
 
-// "Go to Settings." → "Open Account." → "Tap Delete account and confirm." — from IN_APP_DELETE_PATH.
-const inAppDeleteSteps = (): string =>
-  IN_APP_DELETE_PATH.map((screen, i) => {
-    const last = i === IN_APP_DELETE_PATH.length - 1;
-    const verb = i === 0 ? "Go to" : last ? "Tap" : "Open";
-    return `<li>${verb} <strong>${screen}</strong>${last ? ", then confirm" : ""}.</li>`;
-  }).join("\n        ");
-
 /**
  * Account-deletion page — the "Delete account URL" on the Google Play listing.
  *
@@ -422,12 +420,11 @@ const inAppDeleteSteps = (): string =>
  * steps to request deletion front and centre — including a route for someone who no longer has the
  * app — and (3) say what is deleted, what is kept, and for how long.
  *
- * What is deleted = what DELETE /users/me (userService.deleteAccount) removes: the User row, which
- * cascades to Company, Customer, Product, Invoice (+ InvoiceItem, tombstones included), Settings and
- * RefreshToken. What is kept = what genuinely survives that call: the S3 images under
- * media/<userId>/ (nothing deletes them — disclosed by the owner's decision, 2026-09-24), and the
- * nginx logs. The email route can remove images too because the operator can still map the account
- * to its media/<userId>/ prefix BEFORE deleting the row; after an in-app deletion that link is gone.
+ * EMAIL ROUTE ONLY while the app's in-app deletion is hidden (APP-013; see IN-APP DELETION above).
+ * What is deleted = what the operator runbook in docs/DEPLOY.md removes: every S3 image under
+ * media/<userId>/, then the User row, which cascades to Company, Customer, Product, Invoice
+ * (+ InvoiceItem, tombstones included), Settings and RefreshToken. What is kept = what survives it:
+ * the nginx access logs (SERVER_LOG_RETENTION_DAYS). There are no backups to age out.
  */
 export const renderDeleteAccount = (): string => {
   const app = LEGAL_APP_NAME;
@@ -443,26 +440,10 @@ export const renderDeleteAccount = (): string => {
     data of yours</strong> &mdash; it is all on your phone, and uninstalling ${app} or clearing its
     storage removes it.</p>
 
-    <p>If you did sign in, there are two ways to delete your account: inside the app, or by email if you
-    no longer have the app.</p>
+    <p>If you did sign in, you can ask us to delete your account by email. It works whether or not you
+    still have the app installed.</p>
 
-    <h2>Option 1 &mdash; Delete your account in the app</h2>
-    <div class="callout">
-      <ol class="steps">
-        <li>Open <strong>${app}</strong> and make sure you are signed in to the account you want to
-          delete.</li>
-        ${inAppDeleteSteps()}
-      </ol>
-    </div>
-    <p>Your account and its data are deleted from our servers <strong>immediately and
-    permanently</strong>, and you are signed out. This cannot be undone, and we cannot restore a deleted
-    account. It does not remove the images you uploaded &mdash; if you want those removed too, email us
-    <strong>before</strong> you delete your account, or use Option 2 instead (see &ldquo;What is kept,
-    and for how long&rdquo;).</p>
-
-    <h2>Option 2 &mdash; Request deletion by email</h2>
-    <p>Use this if you have uninstalled the app or cannot sign in. It removes your uploaded images as
-    well.</p>
+    <h2>How to request deletion</h2>
     <div class="callout">
       <ol class="steps">
         <li>Email <a href="mailto:${email}?subject=${deleteSubject}">${email}</a> from the Google account
@@ -473,7 +454,7 @@ export const renderDeleteAccount = (): string => {
       </ol>
     </div>
     <p>We complete verified requests within <strong>${REQUEST_RESPONSE_DAYS} days</strong>, and email you
-    once it is done.</p>
+    once it is done. Deletion is permanent: we cannot restore a deleted account.</p>
 
     <h2>What is deleted</h2>
     <p>Deleting your account permanently removes from our servers:</p>
@@ -482,6 +463,8 @@ export const renderDeleteAccount = (): string => {
         Google account identifier linked to your ${app} account.</li>
       <li><strong>Your business profile</strong> &mdash; including your address, GSTIN, bank and UPI
         details, and your authorised signatory&rsquo;s name and designation.</li>
+      <li><strong>The images you uploaded</strong> &mdash; your logo, signature and payment QR image,
+        including earlier ones you replaced.</li>
       <li><strong>All your invoices</strong>, including ones you had already deleted, with their line
         items.</li>
       <li><strong>Your customers and products.</strong></li>
@@ -491,12 +474,6 @@ export const renderDeleteAccount = (): string => {
 
     <h2>What is kept, and for how long</h2>
     <ul>
-      <li><strong>Images you uploaded</strong> &mdash; your logo, signature and payment QR image,
-        including earlier ones you replaced. These are <strong>not removed automatically</strong> when
-        you delete your account in the app. They stay at long, random web addresses that we do not
-        publish or list anywhere, until you ask us to remove them. Deleting by email (Option 2) removes
-        them; if you delete in the app, email us <strong>before</strong> you do &mdash; once the account
-        is gone we can no longer tell which images were yours.</li>
       <li><strong>Web server records</strong> (up to <strong>${SERVER_LOG_RETENTION_DAYS}
         days</strong>) &mdash; technical records of requests, such as IP addresses, that we use to run
         and secure the Service. They are deleted automatically.</li>

@@ -74,8 +74,17 @@ Text:    color(#hex), fontSize(pt), fontWeight(100–900), fontStyle(normal|ital
 Misc:    overflow, verticalAlign, opacity(0–1)
 ```
 
-`fontFamily` is always one of the app-bundled fonts (Inter, Roboto, Open Sans, Lato, Montserrat) —
-the compiler rejects any other, so the renderer never has to fall back to a system face.
+`fontFamily` is always one of the five fonts the compiler accepts (Inter, Roboto, Open Sans, Lato,
+Montserrat); any other is rejected. The Billanta app currently draws every template in Inter
+regardless (APP-013), so a template's declared font shows only in its picker thumbnail. Whether to
+align the two is an open decision (BE-018).
+
+**Box model: content-box.** `width`, `height` and the `min*`/`max*` keys size a node's *content*.
+Padding and border widths are added outside that, and margins outside those. So a node with
+`width: 200pt`, `paddingLeft`/`paddingRight: 10pt` and 1pt left/right borders takes 222pt across, and a
+`"50%"` width is 50% of the parent's content width *before* the node's own padding. This is CSS's
+default, and the compiler guarantees it: `box-sizing` is rejected in template CSS (both values), so
+no template can ask for border-box sizing. Renderers must lay out content-box.
 
 ## Values and spans
 

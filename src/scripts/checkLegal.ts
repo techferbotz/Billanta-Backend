@@ -19,7 +19,6 @@ import { config } from "../config/env";
 import legalRoutes from "../modules/legal/legal.routes";
 import {
   DELETE_ACCOUNT_EFFECTIVE_DATE,
-  IN_APP_DELETE_PATH,
   LEGAL_APP_NAME,
   LEGAL_COMPANY,
   LEGAL_CONTACT_EMAIL,
@@ -138,12 +137,14 @@ check("quotes the retention constants and the minimum age", () => {
 });
 
 check("discloses what the code really does with images, deletes and technical headers", () => {
-  // Pinned on purpose: if media cleanup on account deletion is ever implemented, this check and
-  // the pages must change together.
+  // Pinned on purpose: account deletion is email-only while the app's in-app row is hidden
+  // (APP-013), and the email runbook removes images. When the in-app row ships, DELETE /users/me
+  // becomes a user-facing route that keeps images — this check and the pages must change together.
   includesAll(
     pages.privacy,
     [
-      "not</strong> removed automatically when you delete your account",
+      "kept until you delete your account or ask us to remove them",
+      "your whole account by emailing us",
       "anyone who has that exact address can open the image",
       "Invoices you delete</strong> are marked as deleted rather than erased",
       "random identifier created when the app was installed",
@@ -208,12 +209,12 @@ check("names the app and the developer on the store listing", () => {
   assert.ok(pages.deleteAccount.includes(`Last updated: ${DELETE_ACCOUNT_EFFECTIVE_DATE}`));
 });
 
-check("gives numbered in-app steps naming every screen, and an email route", () => {
+check("gives the email route as numbered steps, and no in-app steps (APP-013)", () => {
   const html = pages.deleteAccount;
   assert.ok(html.includes('<ol class="steps">'));
-  for (const screen of IN_APP_DELETE_PATH) {
-    assert.ok(html.includes(`<strong>${screen}</strong>`), `step "${screen}" missing`);
-  }
+  // The app hides its in-app deletion row; reviewers follow this page literally, so it must not
+  // name an in-app screen until a later APP entry says the row has shipped.
+  assert.doesNotMatch(html, /\bSettings\b|\bProfile\b|Option 1|in the app/, "names an in-app path");
   includesAll(
     html,
     [
@@ -232,6 +233,7 @@ check("lists what is deleted — every table DELETE /users/me cascades to", () =
       "What is deleted",
       "Your account details",
       "Your business profile",
+      "The images you uploaded",
       "All your invoices</strong>, including ones you had already deleted",
       "Your customers and products",
       "Your invoice settings",
@@ -246,12 +248,12 @@ check("states what is kept, and for how long", () => {
     pages.deleteAccount,
     [
       "What is kept, and for how long",
-      "Images you uploaded",
-      "not removed automatically",
       `up to <strong>${SERVER_LOG_RETENTION_DAYS} days</strong>`,
     ],
     "delete-account"
   );
+  // The email runbook deletes the images, so they must not be listed as kept.
+  assert.doesNotMatch(text(pages.deleteAccount), /not removed automatically/);
 });
 
 check("warns that deleting the account does not cancel a Play subscription", () => {

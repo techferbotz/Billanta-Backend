@@ -194,6 +194,11 @@ expectReject("rejects <iframe>", wrap(`<iframe></iframe>`), "", "html", "unsuppo
 expectReject("rejects on* handler", wrap(`<span onclick="x">hi</span>`), "", "html", "event-handler");
 expectReject("rejects external img url (not a binding)", wrap(`<img src="https://evil.com/x.png" />`), "", "binding", "single binding");
 expectReject("rejects unsupported CSS property", wrap(`<span>x</span>`), `span { animation: spin 1s; }`, "css", `unsupported property "animation"`);
+// The app lays out content-box: a width is the content width, and padding and border sit outside it
+// (TEMPLATE_JSON.md § The style object; APP-013). box-sizing is rejected rather than honoured, so a
+// border-box template can never be published and then overflow on a content-box renderer.
+expectReject("rejects box-sizing: border-box (renderers are content-box)", wrap(`<div>x</div>`), `div { box-sizing: border-box; }`, "css", `unsupported property "box-sizing"`);
+expectReject("rejects box-sizing even when it restates the default", wrap(`<div>x</div>`), `div { box-sizing: content-box; }`, "css", `unsupported property "box-sizing"`);
 expectReject("rejects @media at-rule", wrap(`<span>x</span>`), `@media print { span { color: red; } }`, "css", `unsupported at-rule "@media"`);
 expectReject("rejects pseudo-selector", wrap(`<span>x</span>`), `span:hover { color: red; }`, "css", "pseudo-selectors");
 expectReject("rejects universal selector", wrap(`<span>x</span>`), `* { color: red; }`, "css", "universal selector");

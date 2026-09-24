@@ -41,9 +41,9 @@ Play listing, and the app opens them from `GET /config` → `links.*` — **neve
 | Delete your account | `GET /delete-account` | `/account-deletion`, `/data-deletion` |
 
 The delete-account page is Google Play's "Delete account URL": it names the app and the developer
-(**Ferbotz**), gives the in-app steps (**Settings → Account → Delete account**, which must call
-`DELETE /users/me`) and an email route (`support@ferbotz.com`), and states what is deleted and what is
-kept. Content lives in `src/modules/legal/legal.view.ts`; `npm run check:legal` pins it.
+(**Ferbotz**), gives the email route (`support@ferbotz.com`), and states what is deleted (everything,
+including uploaded images) and what is kept (web-server records, 14 days). It lists **no in-app
+steps** while the app's in-app deletion is hidden (APP-013). Content lives in `src/modules/legal/legal.view.ts`; `npm run check:legal` pins it.
 
 ### In the app (HOA protocol 12 §3)
 
@@ -55,19 +55,20 @@ launch that has never reached `/config`.
 | --- | --- | --- | --- | --- |
 | Privacy Policy | `privacyPolicy` | `https://billanta.ferbotz.com/privacy` | Settings · sign-in consent line · premium/upgrade screen | in-app browser tab (Custom Tabs) |
 | Terms & Conditions | `terms` | `https://billanta.ferbotz.com/terms` | Settings · sign-in consent line · premium/upgrade screen | in-app browser tab |
-| What's deleted and kept | `deleteAccount` | `https://billanta.ferbotz.com/delete-account` | the Delete-account confirmation screen (below) | in-app browser tab |
+| Delete account (web page) | `deleteAccount` | `https://billanta.ferbotz.com/delete-account` | optional today (see below); later, the in-app deletion confirmation screen | in-app browser tab |
 | Contact support | `supportEmail` | `support@ferbotz.com` | Settings | `mailto:` |
 
 - **Sign-in:** next to "Sign in with Google", the line *"By continuing you agree to our Terms &
   Conditions and Privacy Policy"*, with both phrases linked.
-- **Delete account** (signed in only) lives at **Settings → Account → Delete account**. The public
-  delete-account page gives Play reviewers exactly these steps, and they follow them literally. The
-  row opens a confirmation screen that says what happens, links *"What's deleted and kept"* to
-  `links.deleteAccount`, and has the destructive **Delete account** button. That button calls
-  `DELETE /users/me`, then signs out locally. It is a real in-app deletion, not just a web link:
-  Google Play requires deletion to be possible inside the app.
-- **Don't promise image removal** in the confirmation copy. In-app deletion keeps the uploaded logo,
-  signature and QR images; the page tells users to email support first if they want those removed.
+- **Delete account, today:** in-app deletion is built but hidden (APP-013), and the public page
+  offers only the email route. A Settings row labelled "Delete account" that opens
+  `links.deleteAccount` is protocol 12's literal form and gives signed-in users a route to find;
+  whether to show it meanwhile is the app's call.
+- **Delete account, when it ships:** the path is **Profile → Settings → Account → Delete account**:
+  a confirmation screen, then `DELETE /users/me`, then local sign-out. Send the `APP-nnn` that
+  announces it **before** the build reaches users or Play review, so the public page can list those
+  steps the same day. Reviewers follow the page literally. That confirmation copy must not promise
+  image removal: `DELETE /users/me` keeps the uploaded images, unlike the email route.
 
 ---
 
@@ -78,8 +79,8 @@ The behaviour switches the app reads **on every cold start**: feature kill switc
 policy, maintenance, the caps to respect, the legal links. Changing them needs no app release.
 
 **Nothing about the caller is required** — no token, no headers, no query string. It never touches
-the database, so it answers even when Postgres is down. Full design + how to change a value:
-[`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
+the database, so it answers even when Postgres is down. This section is the whole contract for the
+app; the backend's design notes and ops runbook live in the backend repo (`docs/REMOTE_CONFIG.md`).
 
 Optional request headers (the targeting inputs — send them on **every** request, not just this
 one; a garbled value is treated as absent, never a `400`):
