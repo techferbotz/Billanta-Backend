@@ -45,6 +45,30 @@ The delete-account page is Google Play's "Delete account URL": it names the app 
 `DELETE /users/me`) and an email route (`support@ferbotz.com`), and states what is deleted and what is
 kept. Content lives in `src/modules/legal/legal.view.ts`; `npm run check:legal` pins it.
 
+### In the app (HOA protocol 12 §3)
+
+At runtime, always read these from `GET /config` → `links.*`. The values below are what `links.*`
+carries today. Use them **only** as the app's compiled-in defaults, so the links work on a first
+launch that has never reached `/config`.
+
+| UI item | `links.*` key | Today's value | Where it appears | Opens |
+| --- | --- | --- | --- | --- |
+| Privacy Policy | `privacyPolicy` | `https://billanta.ferbotz.com/privacy` | Settings · sign-in consent line · premium/upgrade screen | in-app browser tab (Custom Tabs) |
+| Terms & Conditions | `terms` | `https://billanta.ferbotz.com/terms` | Settings · sign-in consent line · premium/upgrade screen | in-app browser tab |
+| What's deleted and kept | `deleteAccount` | `https://billanta.ferbotz.com/delete-account` | the Delete-account confirmation screen (below) | in-app browser tab |
+| Contact support | `supportEmail` | `support@ferbotz.com` | Settings | `mailto:` |
+
+- **Sign-in:** next to "Sign in with Google", the line *"By continuing you agree to our Terms &
+  Conditions and Privacy Policy"*, with both phrases linked.
+- **Delete account** (signed in only) lives at **Settings → Account → Delete account**. The public
+  delete-account page gives Play reviewers exactly these steps, and they follow them literally. The
+  row opens a confirmation screen that says what happens, links *"What's deleted and kept"* to
+  `links.deleteAccount`, and has the destructive **Delete account** button. That button calls
+  `DELETE /users/me`, then signs out locally. It is a real in-app deletion, not just a web link:
+  Google Play requires deletion to be possible inside the app.
+- **Don't promise image removal** in the confirmation copy. In-app deletion keeps the uploaded logo,
+  signature and QR images; the page tells users to email support first if they want those removed.
+
 ---
 
 ## Remote config
