@@ -140,7 +140,7 @@ check("JSON-clean (no undefined), absolute links, positive limits", () => {
   assert.deepEqual(roundTrip, DEFAULT_REMOTE_CONFIG);
   for (const [key, url] of Object.entries(DEFAULT_REMOTE_CONFIG.links)) {
     if (key === "supportEmail") assert.match(url, /^[^@\s]+@[^@\s]+$/);
-    else assert.match(url, /^https:\/\//, `links.${key} must be absolute https`);
+    else assert.match(url, /^https?:\/\//, `links.${key} must be an absolute URL`);
   }
   assert.ok(DEFAULT_REMOTE_CONFIG.limits.maxMediaBytes > 0);
   assert.ok(DEFAULT_REMOTE_CONFIG.limits.maxSyncBatchInvoices > 0);

@@ -1,27 +1,21 @@
-import { Router, Request, Response } from "express";
-import { PRIVACY_POLICY_HTML } from "./privacyPolicy";
-import { TERMS_HTML } from "./terms";
-import { DELETE_ACCOUNT_HTML } from "./deleteAccount";
+import { Router } from "express";
+import { legalController } from "./legal.controller";
+import { LEGAL_PATHS } from "./legal.view";
 
-// Public, unauthenticated legal pages. A reachable Privacy Policy and an Account Deletion URL are
-// required by Google Play, and the app links to them directly. Mounted with no auth middleware,
-// so Play Console's crawler and browsers reach them freely. Several path aliases are served so
-// links keep working regardless of which form was used.
+// Public, unauthenticated legal pages (HOA protocol 12), mounted at the root before any auth, so
+// Play Console's crawler, store reviewers and the app's in-app browser all reach them freely.
+// Each page has its canonical path (LEGAL_PATHS — what GET /config hands the app) plus aliases, so
+// every URL that has ever been shared keeps working.
 const router = Router();
 
-const serve = (html: string) => (_req: Request, res: Response) => res.type("html").send(html);
-
-const servePrivacy = serve(PRIVACY_POLICY_HTML);
-const serveTerms = serve(TERMS_HTML);
-const serveDeleteAccount = serve(DELETE_ACCOUNT_HTML);
-
-router.get("/privacy", servePrivacy);
-router.get("/privacy-policy", servePrivacy);
-router.get("/terms", serveTerms);
-router.get("/terms-of-service", serveTerms);
-router.get("/terms-and-conditions", serveTerms);
-router.get("/delete-account", serveDeleteAccount);
-router.get("/account-deletion", serveDeleteAccount);
-router.get("/data-deletion", serveDeleteAccount);
+router.get([LEGAL_PATHS.privacy, "/privacy-policy"], legalController.privacyPolicy);
+router.get(
+  [LEGAL_PATHS.terms, "/terms-of-service", "/terms-and-conditions"],
+  legalController.termsAndConditions
+);
+router.get(
+  [LEGAL_PATHS.deleteAccount, "/account-deletion", "/data-deletion"],
+  legalController.deleteAccount
+);
 
 export default router;

@@ -34,10 +34,37 @@ const parseJsonObjectEnv = (key: string): Record<string, unknown> | null => {
   return parsed as Record<string, unknown>;
 };
 
+// Parses an OPTIONAL env var holding a public ORIGIN (scheme + host [+ port], nothing else),
+// falling back when unset/blank. A trailing slash is tolerated and stripped, so callers append
+// paths. Anything else — not a URL, not http(s), or carrying a path/query — throws at startup,
+// like requireEnv, instead of quietly producing broken absolute links at runtime.
+const parseOriginEnv = (key: string, fallback: string): string => {
+  const raw = process.env[key]?.trim() || fallback;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Environment variable ${key} is not a valid absolute URL: "${raw}"`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Environment variable ${key} must be an http(s) URL: "${raw}"`);
+  }
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error(`Environment variable ${key} must be a bare origin with no path: "${raw}"`);
+  }
+  return url.origin;
+};
+
 // Centralized, typed configuration. Import this instead of reading process.env
 // directly — nothing else in the codebase may touch process.env.
 export const config = {
   port: process.env.PORT ? Number(process.env.PORT) : 3000,
+
+  // The public origin this backend is served from. It is the ONE place absolute URLs are built
+  // from — today the legal pages' links handed to the app in GET /config (`links.*`), so a page
+  // can move hosts with an env change instead of an app release (HOA protocol 12). No trailing
+  // slash. Defaults to production, so dev and check scripts get real, working links.
+  publicUrl: parseOriginEnv("APP_PUBLIC_URL", "https://billanta.ferbotz.com"),
 
   // --- Required: the app refuses to start without these ---------------------------
   databaseUrl: requireEnv("DATABASE_URL"),

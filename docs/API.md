@@ -30,8 +30,20 @@ not-yours), `409` (duplicate id or number), `503` (media when S3 unconfigured).
 
 ## Legal (public HTML)
 
-`GET /privacy` · `/terms` · `/delete-account` (plus aliases `/privacy-policy`,
-`/terms-of-service`, `/terms-and-conditions`, `/account-deletion`, `/data-deletion`).
+Three public pages (HOA protocol 12): no auth, `Content-Type: text/html`, self-contained (inline CSS,
+no scripts or external assets), light theme, readable on a phone. They are the URLs on the Google
+Play listing, and the app opens them from `GET /config` → `links.*` — **never hard-code them**.
+
+| Page | Canonical path (what `/config` hands out) | Aliases |
+| --- | --- | --- |
+| Privacy Policy | `GET /privacy` | `/privacy-policy` |
+| Terms & Conditions | `GET /terms` | `/terms-of-service`, `/terms-and-conditions` |
+| Delete your account | `GET /delete-account` | `/account-deletion`, `/data-deletion` |
+
+The delete-account page is Google Play's "Delete account URL": it names the app and the developer
+(**Ferbotz**), gives the in-app steps (**Settings → Account → Delete account**, which must call
+`DELETE /users/me`) and an email route (`support@ferbotz.com`), and states what is deleted and what is
+kept. Content lives in `src/modules/legal/legal.view.ts`; `npm run check:legal` pins it.
 
 ---
 
@@ -61,7 +73,7 @@ Authorization: Bearer <jwt>    # when signed in — enables per-user overrides
 { "success": true, "data": {
   "schemaVersion": 1,
   "variant": "default",
-  "revision": "bee4d118f4d4",
+  "revision": "23e0a1c074d1",
   "ttlSeconds": 3600,
   "config": {
     "features": { "googleLogin": true, "cloudSync": true, "templateStore": true,
@@ -73,7 +85,7 @@ Authorization: Bearer <jwt>    # when signed in — enables per-user overrides
     "links": { "privacyPolicy": "https://billanta.ferbotz.com/privacy",
                "terms": "https://billanta.ferbotz.com/terms",
                "deleteAccount": "https://billanta.ferbotz.com/delete-account",
-               "supportEmail": "vishalb250601@gmail.com" }
+               "supportEmail": "support@ferbotz.com" }
   }
 } }
 ```

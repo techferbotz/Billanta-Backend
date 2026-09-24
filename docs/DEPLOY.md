@@ -156,12 +156,44 @@ The container **refuses to start** on a bad patch, naming the path
 (`REMOTE_CONFIG_OVERRIDES.features.nope: unknown key`). To undo: remove the line, `up -d app`
 again. See [`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
 
-## 7. Before launch — legal pages
+## 7. Legal pages (HOA protocol 12)
 
-The pages at `/privacy`, `/terms` and `/delete-account` are **templates**. Have them reviewed by a
-qualified professional and confirm the product name, contact email and effective date
-(`src/modules/legal/legalLayout.ts`) before submitting to Google Play, which requires reachable
-Privacy Policy and Account Deletion URLs.
+`/privacy`, `/terms` and `/delete-account` are served by this backend and handed to the app through
+`GET /config` → `links.*`. The three URLs for the **Play Console** (and the project details doc):
+
+```
+Privacy Policy     https://billanta.ferbotz.com/privacy
+Terms              https://billanta.ferbotz.com/terms
+Delete account     https://billanta.ferbotz.com/delete-account
+```
+
+The origin comes from `APP_PUBLIC_URL` (optional; defaults to `https://billanta.ferbotz.com`). The
+prose, developer name (**Ferbotz**), contact (**support@ferbotz.com**), dates and retention numbers
+live in `src/modules/legal/legal.view.ts`. **Only claim what the code does:** when data handling
+changes, change the pages in the same commit, bump the effective date, and run
+`npm run check:legal`. They are starting templates — have them reviewed before relying on them.
+
+Two pages quote facts about THIS box rather than the code — keep them true if the box changes:
+nginx access logs are kept **14 days** (`/etc/logrotate.d/nginx`: daily, `rotate 14`), and there are
+**no database backups**, so nothing lingers after a deletion (add a retention line if that changes).
+
+### Handling an emailed deletion request
+
+The delete-account page promises to act on email within **30 days**, and that the email route also
+removes the user's uploaded images (the in-app `DELETE /users/me` does not touch S3). On the box:
+
+```bash
+# 1) look up the account (and confirm the request came from this address)
+sudo -u postgres psql -d billanta -c "SELECT id, email, \"createdAt\" FROM \"User\" WHERE email = '<address>';"
+# 2) remove their uploaded images — every upload lives under media/<userId>/
+aws s3 rm "s3://billanta-media/media/<userId>/" --recursive
+# 3) delete the account — cascades to company, customers, products, invoices, settings, sessions
+sudo -u postgres psql -d billanta -c "DELETE FROM \"User\" WHERE id = '<userId>';"
+```
+
+Step 2 needs `s3:ListBucket`, which the instance role does not have — run it with the `claude-ops`
+CLI credentials from the dev machine, not on the box. An "images only" request is step 2 alone.
+Reply to the user when done.
 
 ## Troubleshooting
 

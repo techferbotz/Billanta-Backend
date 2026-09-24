@@ -97,6 +97,7 @@ npm run check:compiler      # template compiler: structure, determinism, exact-l
 npm run check:seeds         # every seed template compiles deterministically
 npm run check:money         # invoice calculation fixtures (exact paise)
 npm run check:config        # remote config: strict merge, header parsing, resolve order, fail-fast
+npm run check:legal         # legal pages: required sections, quoted constants, /config links match
 npm run check:phase3        # cross-user isolation           (needs DB + running server)
 npm run check:phase4        # template authoring→serving      (needs DB + running server)
 npm run check:phase5        # invoice CRUD + recompute + sync (needs DB + running server)
@@ -116,7 +117,9 @@ Required (the app **fails fast on startup** if any are missing — `src/config/e
 - `GOOGLE_CLIENT_ID` — every Google idToken is verified and its `aud` must equal this
 - `ADMIN_API_KEY` — bearer key for the `/admin` authoring API
 
-Optional: `PORT` (3000), `ACCESS_TOKEN_TTL` (15m), `REFRESH_TOKEN_TTL_DAYS` (60),
+Optional: `PORT` (3000), `APP_PUBLIC_URL` (the public origin, default
+`https://billanta.ferbotz.com` — absolute links in `GET /config` are built from it; a path or a
+malformed value fails startup), `ACCESS_TOKEN_TTL` (15m), `REFRESH_TOKEN_TTL_DAYS` (60),
 `REMOTE_CONFIG_OVERRIDES` (a JSON *patch* over the `GET /config` document, applied to every
 caller — the no-deploy kill switch; an unknown key or wrong type **fails startup** on purpose),
 `S3_BUCKET` + `AWS_REGION` + `S3_PUBLIC_BASE_URL` (media; unset ⇒ `POST /media` returns 503 and
@@ -155,6 +158,7 @@ src/
     seed/seedTemplates.ts       # 3 starter templates (also the authoring examples)
   modules/                      # feature modules: routes → controller → service → repository → dto
     auth/ user/ company/ settings/ customer/ invoice/ template/ media/ admin/ legal/
+    legal/                      # /privacy /terms /delete-account — HTML rendered from legal.view.ts constants
     remoteConfig/               # GET /config — defaults + env overrides + targeting rules; no DB
   scripts/                      # the check:* verification scripts
 docker-compose.yml              # dev (includes postgres:16)
@@ -185,6 +189,12 @@ Dockerfile                      # multi-stage builder + runner (non-root)
   default the ones they're missing. Adding a key is free; removing or renaming one breaks old
   builds — bump `SCHEMA_VERSION` and prefer adding. Numbers the server enforces are **imported**
   into the defaults, never retyped. HOA protocol 10; see [`docs/REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md).
+- **The legal pages only claim what the code does** (HOA protocol 12). Every data category,
+  processor and retention period in `src/modules/legal/legal.view.ts` was checked against the
+  schema, the deletion path and the box. When data handling changes — a new synced field, a new
+  processor, media cleanup on account deletion, backups — change the pages **in the same commit**,
+  bump the effective date, and run `npm run check:legal`. The app shows them from `GET /config`
+  `links.*`, never hard-coded URLs.
 - **Published template versions are immutable.** Editing publishes a NEW version — which is what
   lets clients cache a compiled tree by `(templateId, version)` forever.
 
@@ -224,3 +234,6 @@ Dockerfile                      # multi-stage builder + runner (non-root)
 7. **Remote config** — `GET /config`: the behaviour switches the app reads at launch (feature kill
    switches, update policy, maintenance, mirrored limits, legal links), resolved from defaults +
    `REMOTE_CONFIG_OVERRIDES` + an (empty) targeting-rule registry. Pure, synchronous, no DB.
+8. **Legal pages to protocol 12** — privacy / terms / delete-account rewritten against the real
+   codebase (developer Ferbotz, support@ferbotz.com, laws of India), light theme, `APP_PUBLIC_URL`
+   as the one origin for `/config` links, and `check:legal` pinning the pages to their constants.

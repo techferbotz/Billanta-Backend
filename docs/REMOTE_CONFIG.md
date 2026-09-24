@@ -74,7 +74,7 @@ Live example (today's defaults, verbatim):
   "data": {
     "schemaVersion": 1,
     "variant": "default",
-    "revision": "bee4d118f4d4",
+    "revision": "23e0a1c074d1",
     "ttlSeconds": 3600,
     "config": {
       "features": { "googleLogin": true, "cloudSync": true, "templateStore": true,
@@ -86,7 +86,7 @@ Live example (today's defaults, verbatim):
       "links": { "privacyPolicy": "https://billanta.ferbotz.com/privacy",
                  "terms": "https://billanta.ferbotz.com/terms",
                  "deleteAccount": "https://billanta.ferbotz.com/delete-account",
-                 "supportEmail": "vishalb250601@gmail.com" }
+                 "supportEmail": "support@ferbotz.com" }
     }
   }
 }
@@ -117,8 +117,8 @@ value is deliberately flipped.
 | `limits.maxMediaBytes` | `8388608` | Reject an image above this **before** uploading. **Mirrors** `common/middleware/upload.middleware.ts:MAX_MEDIA_BYTES`. |
 | `limits.maxSyncBatchInvoices` | `500` | Chunk a sync push to at most this many invoices. Mirrors `modules/invoice/invoice.constants.ts`. |
 | `limits.maxPageSize` | `100` | The ceiling on `?limit` for every list endpoint. Mirrors `common/pagination.ts:MAX_PAGE_SIZE`. |
-| `links.privacyPolicy` / `terms` / `deleteAccount` | absolute URLs | Built from `legal/legalLayout.ts:LEGAL.appUrl`. Use these, never hard-coded URLs. |
-| `links.supportEmail` | the contact address | `LEGAL.contactEmail`. |
+| `links.privacyPolicy` / `terms` / `deleteAccount` | absolute URLs | `config.publicUrl` (`APP_PUBLIC_URL`) + `legal/legal.view.ts:LEGAL_PATHS` — the same paths the pages are served on (HOA protocol 12). Use these, never hard-coded URLs; where the app must show them is in §4. |
+| `links.supportEmail` | `support@ferbotz.com` | `legal/legal.view.ts:LEGAL_CONTACT_EMAIL` — the address the pages themselves publish. |
 
 `features.*` are **client-side gates only**. Turning one off hides the entry point in the app; the
 API route itself keeps working (an incident that needs the API closed is handled at the server,
@@ -156,6 +156,10 @@ still equal the constants the server enforces.
    **only** here, for bucketing: Billanta's ownership model is `userId` and nothing else.
 6. Log `variant` and `revision` with the applied document, so "is this device on the new config?"
    is answerable — and attach both to analytics events once there is an analytics SDK.
+7. **Show the legal links from `links.*`** (HOA protocol 12 §3): Privacy Policy, Terms & Conditions,
+   Delete account and Contact support in **Settings**; the consent line *"By continuing you agree to
+   our Terms & Conditions and Privacy Policy"* at **sign-in**; Terms + Privacy on the **premium /
+   upgrade** screen. Open URLs in an in-app browser tab; support opens a `mailto:`.
 
 ---
 
