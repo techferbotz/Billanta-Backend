@@ -44,6 +44,27 @@ export class RemoteConfigService {
   }
 
   resolve(ctx: ConfigContext): RemoteConfigDto {
+    const { config: resolved, applied } = this.resolveWithRules(ctx);
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      variant: ["default", ...applied].join("+"),
+      revision: fingerprint(resolved),
+      ttlSeconds: TTL_SECONDS,
+      config: resolved,
+    };
+  }
+
+  // The resolved document on its own, without the envelope (no fingerprint, no variant).
+  //
+  // For server code that must OBEY a config value rather than report it (HOA protocol 10 §2
+  // rule 8). Billanta has no such value yet. Reading the same resolved document the app is handed
+  // is the point: an env override then changes the behaviour and what the app is told in one move,
+  // instead of advertising a switch that the server quietly ignores.
+  resolveConfig(ctx: ConfigContext): RemoteConfig {
+    return this.resolveWithRules(ctx).config;
+  }
+
+  private resolveWithRules(ctx: ConfigContext): { config: RemoteConfig; applied: string[] } {
     let resolved = this.base;
     const applied: string[] = [];
     for (const rule of this.layers.rules) {
@@ -52,13 +73,7 @@ export class RemoteConfigService {
         applied.push(rule.id);
       }
     }
-    return {
-      schemaVersion: SCHEMA_VERSION,
-      variant: ["default", ...applied].join("+"),
-      revision: fingerprint(resolved),
-      ttlSeconds: TTL_SECONDS,
-      config: resolved,
-    };
+    return { config: resolved, applied };
   }
 }
 

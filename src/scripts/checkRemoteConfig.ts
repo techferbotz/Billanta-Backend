@@ -273,6 +273,28 @@ check("rules apply only when they match, in order, and show up in variant", () =
   assert.notEqual(both.revision, nobody.revision);
 });
 
+check("resolveConfig is exactly the document resolve() serves, overrides and rules applied", () => {
+  // Server code that must OBEY a value reads it through resolveConfig — so it has to be the
+  // very document the app is handed, for every caller, or a switch could say one thing while
+  // the server does another.
+  const rule: ConfigRule = {
+    id: "old-android",
+    description: "",
+    matches: (ctx) => ctx.platform === "android",
+    patch: { features: { productCatalogue: false } },
+  };
+  const svc = new RemoteConfigService({
+    defaults: DEFAULT_REMOTE_CONFIG,
+    overrides: { maintenance: { message: "Back soon" } },
+    rules: [rule],
+  });
+  for (const ctx of [anon, noDevice, { ...anon, platform: "android" as const }]) {
+    assert.deepEqual(svc.resolveConfig(ctx), svc.resolve(ctx).config);
+  }
+  assert.equal(svc.resolveConfig({ ...anon, platform: "android" }).features.productCatalogue, false);
+  assert.equal(svc.resolveConfig(anon).maintenance.message, "Back soon");
+});
+
 check("duplicate or malformed rule ids are rejected at startup", () => {
   const rule: ConfigRule = { id: "dup", description: "", matches: () => false, patch: {} };
   assert.throws(
