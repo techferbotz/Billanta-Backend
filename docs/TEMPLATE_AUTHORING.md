@@ -148,3 +148,26 @@ them is guaranteed to compile.
 - Bold/italic inline runs work: `<strong>{{ invoice.total | currency }}</strong>`.
 - If a compile fails, the error names the phase, the offending token, and the source line — fix
   that and recompile. Nothing is stored until it compiles cleanly.
+- **Don't set a `%` width and padding on the same element.** The app's renderer adds padding *on top
+  of* a declared width, so two `width: 50%` cells with side padding overrun their row and push the
+  right-hand one past the page edge (browsers hide this by shrinking flex items, so a browser preview
+  won't show it). Put the width on an outer element and the padding on an inner one.
+
+## The picker thumbnail
+
+Publishing a version also renders its **picker thumbnail** — the image the app shows in the template
+grid, and the only preview a non-premium user gets of a premium template. It's page 1, drawn from the
+compiled tree the app downloads, in the default theme, filled with one fixed, fictional sample invoice
+(every binding populated: a logo, four GST line items, a discount, notes, bank + UPI, a signature).
+
+So design for a **full** invoice as well as an empty one: every section you declare will be populated,
+and anything past the bottom of page 1 is cropped.
+
+Preview it before publishing — exactly the image a publish uploads, no server or database needed:
+
+```bash
+npm run thumbnail:render -- --html t.html --css t.css --out t.png
+```
+
+A thumbnail that fails to render never blocks a publish: the panel shows the error beside the version
+with a **Render thumbnail** button, and the picker keeps the previous image meanwhile.

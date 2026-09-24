@@ -1,6 +1,7 @@
 import { Template, TemplateVersion } from "@prisma/client";
 import { BadRequestError } from "../../../common/errors/AppError";
 import { optionalString, requireString } from "../../../common/validation";
+import type { ThumbnailOutcome } from "../../template/service/templateThumbnail.service";
 
 // --- request parsers ----------------------------------------------------------------
 
@@ -117,6 +118,11 @@ export interface AdminVersionSummaryDto {
   status: string;
   compilerVersion: number;
   checksum: string;
+  // The version's picker thumbnail (APP-012). `thumbnailError` is the last failure (null once a
+  // render succeeds); both null means none has been attempted.
+  thumbnailUrl: string | null;
+  thumbnailError: string | null;
+  thumbnailAt: string | null;
   publishedAt: string | null;
   createdAt: string;
 }
@@ -127,9 +133,19 @@ export const toVersionSummary = (v: TemplateVersion): AdminVersionSummaryDto => 
   status: v.status,
   compilerVersion: v.compilerVersion,
   checksum: v.checksum,
+  thumbnailUrl: v.thumbnailUrl,
+  thumbnailError: v.thumbnailError,
+  thumbnailAt: v.thumbnailAt ? v.thumbnailAt.toISOString() : null,
   publishedAt: v.publishedAt ? v.publishedAt.toISOString() : null,
   createdAt: v.createdAt.toISOString(),
 });
+
+// Publish / regenerate responses: the version as it now stands, plus what happened to its thumbnail.
+// A publish always succeeds once committed; `thumbnail.status: "failed"` reports a render that
+// didn't, without undoing the publish.
+export interface AdminThumbnailResultDto extends AdminVersionSummaryDto {
+  thumbnail: ThumbnailOutcome;
+}
 
 // Full version detail (review) — includes source + compiled JSON.
 export interface AdminVersionDetailDto extends AdminVersionSummaryDto {

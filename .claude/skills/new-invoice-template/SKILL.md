@@ -140,6 +140,10 @@ overflow vertical-align opacity`. **Rejected:** animations/transitions/transform
 `position`, media queries, pseudo-classes/elements, `calc()`, `url(...)`, `*`, attribute/sibling selectors.
 **Selectors:** tag, `.class`, `#id`, descendant, `>` child, comma lists.
 **Units:** `px`(→pt ×0.75), `pt`, `%` (width/height/min/max/margin), `auto`. No `em/rem/vw/vh/calc`.
+**Never put a `%` width and padding on the same element.** The app's renderer adds padding on top of a
+declared width, so two `width: 50%` cells with side padding overrun their row and push the right one
+past the page edge. Put the width on an outer element and the padding on an inner wrapper. (Borders
+are fine — 1pt of overrun is invisible.)
 **Fonts:** only **Inter, Roboto, Open Sans, Lato, Montserrat** (or `sans-serif`→Inter).
 **Colours:** hex / `rgb()` / named — all normalised to hex.
 
@@ -237,27 +241,40 @@ Only proceed to publish on **PASS**.
 
 ## Step 5 — Visual QA (recommended)
 
-The compiler guarantees structure, not taste. To eyeball the design, build a quick preview: copy the
-HTML, replace each `{{ binding }}` with a realistic sample value, expand the `data-repeat` row into
-~3 sample line items, inline the CSS in a `<style>` block, and open it in the Browser pane. Confirm it
-reads like a professional invoice before publishing. (This is an approximation — the app's renderer is
-the source of truth — but it catches layout/spacing/colour mistakes.)
+The compiler guarantees structure, not taste. Render the template's **picker thumbnail** — the exact
+image a publish will upload, from the compiled tree, filled with the fixed sample invoice — and look at
+it with the Read tool:
+
+```bash
+npm run thumbnail:render -- --html <html-file> --css <css-file> --out <scratchpad>/preview.png
+```
+
+Confirm it reads like a professional invoice, that every section is populated, and that nothing is
+cropped at the bottom of page 1. Prefer this over a hand-built browser preview: it renders the compiled
+tree the app renders, whereas a browser renders the source and silently repairs layout bugs (it shrinks
+flex items that overflow — see the width + padding rule in Step 2).
+
+For a reproduction, put it side by side with the reference image for the user's nod.
 
 ## Step 6 — Publish live (admin API)
 
-Fetch the admin key from the server `.env` into a transient env var (don't print it), then publish.
-On Windows PowerShell:
+Fetch the admin key from the server `.env` straight into the publish, without echoing it or writing
+it to a file. Use the Bash tool and **this exact prefix** — `.claude/settings.local.json` allow-lists
+ssh to the production host only in this form (key path, then `-o BatchMode=yes`, then the host):
 
-```powershell
-$keyPath = "C:\Users\dhoni\Documents\HouseOfApps\AuraPix\aurapix-ec2-key.pem"
-$env:ADMIN_API_KEY = (ssh -i $keyPath -o BatchMode=yes ubuntu@13.205.128.80 "grep -m1 '^ADMIN_API_KEY=' /opt/apps/billanta/Billanta-Backend/.env | cut -d= -f2-").Trim()
-npx ts-node src/scripts/publishTemplate.ts --id <slug> --name "<Name>" --category "<Category>" <--premium if premium> --base https://billanta.ferbotz.com --html <html-file> --css <css-file>
-Remove-Item Env:\ADMIN_API_KEY
+```bash
+ssh -i "C:/Users/dhoni/Documents/HouseOfApps/AuraPix/aurapix-ec2-key.pem" -o BatchMode=yes ubuntu@13.205.128.80 "grep -m1 '^ADMIN_API_KEY=' /opt/apps/billanta/Billanta-Backend/.env | cut -d= -f2-" | { read -r k; ADMIN_API_KEY="$k" npx ts-node src/scripts/publishTemplate.ts --id <slug> --name "<Name>" --category "<Category>" <--premium if premium> --base https://billanta.ferbotz.com --html <html-file> --css <css-file>; }
 ```
 
 `publishTemplate.ts` creates the template (or adds a version if the slug exists), the server
 **re-compiles** it (a bad template is a 400 with the located message — but Step 4 should have caught
-that), and publishes it as the current, immutable version the app serves.
+that), publishes it as the current, immutable version the app serves, and **renders its picker
+thumbnail**. The script prints the thumbnail URL — or `FAILED` with the reason, in which case the
+publish still stands and the picker keeps the previous image. Retry with the same prefix, running
+`npx ts-node src/scripts/backfillThumbnails.ts --id <slug> --force` in place of the publish.
+
+If ssh times out, the security group probably doesn't allow the current IP on port 22; that's the
+user's to change — don't touch security groups.
 
 ## Step 7 — Confirm it's live
 
@@ -265,8 +282,9 @@ that), and publishes it as the current, immutable version the app serves.
 curl -s https://billanta.ferbotz.com/templates/<slug>/compiled | head -c 400
 ```
 Confirm it returns the compiled tree (or a 403 `PREMIUM_REQUIRED` for a premium template fetched
-anonymously — that's expected and correct). Report the slug, version, free/premium, and that it now
-appears in `GET /templates`.
+anonymously — that's expected and correct). Then confirm `GET /templates` lists it with a non-null
+`thumbnailUrl`, and that the URL loads without auth as `image/webp` (premium included — the picture is
+public even though the tree isn't). Report the slug, version, free/premium and the thumbnail URL.
 
 ## Guardrails
 

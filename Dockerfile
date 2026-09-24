@@ -61,6 +61,10 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/prisma ./prisma
 
+# The fonts the template-thumbnail renderer draws with (the five the app bundles, plus their
+# licences). Found at <root>/assets/fonts relative to dist/, so they sit beside it.
+COPY assets ./assets
+
 # Drop root privileges — the official image ships a non-root `node` user.
 USER node
 

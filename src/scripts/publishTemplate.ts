@@ -1,8 +1,9 @@
 /**
  * Publish an invoice template LIVE via the admin API: create the template (if new), compile + store a
- * version, then publish it (making it the current, immutable version the app serves). Run this only
- * AFTER verifyTemplate.ts passes — the server re-compiles here and rejects a bad template with 400,
- * but verify also catches theme stragglers the API does not.
+ * version, then publish it (making it the current, immutable version the app serves). Publishing also
+ * renders the version's picker thumbnail server-side; the outcome is printed. Run this only AFTER
+ * verifyTemplate.ts passes — the server re-compiles here and rejects a bad template with 400, but
+ * verify also catches theme stragglers the API does not.
  *
  * Standalone (uses global fetch; imports nothing from the app, so no env validation runs).
  *
@@ -95,6 +96,16 @@ const main = async (): Promise<void> => {
   console.log(`\nPUBLISHED — "${id}" v${version} is now live${isPremium ? " (premium)" : ""}.`);
   console.log(`  in the picker:  GET ${base}/templates`);
   console.log(`  compiled tree:  ${base}/templates/${id}/compiled`);
+
+  // 4. The server renders the picker thumbnail as part of the publish (APP-012). A failure there
+  //    never fails the publish — it's reported here, and retried with backfillThumbnails.ts.
+  const thumb = p.json?.data?.thumbnail;
+  if (thumb?.status === "ok") {
+    console.log(`  thumbnail:      ${thumb.url}${thumb.reused ? " (reused)" : ""}`);
+  } else {
+    console.warn(`  thumbnail:      FAILED — ${thumb?.error ?? "no thumbnail outcome in the response"}`);
+    console.warn(`                  the picker keeps the previous image; retry: npx ts-node src/scripts/backfillThumbnails.ts --id ${id} --force`);
+  }
 };
 
 main().catch((e) => {

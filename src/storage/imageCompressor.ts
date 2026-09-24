@@ -32,3 +32,18 @@ export async function compressImage(buffer: Buffer): Promise<Buffer> {
 export async function compressThumbnail(buffer: Buffer): Promise<Buffer> {
   return toWebp(buffer, THUMB_DIMENSION, THUMB_QUALITY);
 }
+
+// Template-picker thumbnail (APP-012): a rendered page, exactly `width` px wide at its own aspect
+// ratio. Deliberately NOT the ≤512px bound above — that caps the long side, which for a portrait
+// page comes out ~362px wide, visibly soft on a phone's grid card. Flattened onto opaque white:
+// some cards are near-black, so no transparent pixel may survive. Small text needs more quality
+// than a photo thumbnail; at 82 an A4 page still lands near 30 KB.
+const PAGE_THUMB_QUALITY = 82;
+
+export async function compressPageThumbnail(png: Buffer, width: number): Promise<Buffer> {
+  return sharp(png)
+    .flatten({ background: "#ffffff" })
+    .resize({ width })
+    .webp({ quality: PAGE_THUMB_QUALITY })
+    .toBuffer();
+}

@@ -47,6 +47,8 @@ export const ADMIN_PANEL_HTML = `<!doctype html>
   .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
   .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   pre.json { background: #0f1420; color: #d6e2f5; padding: 12px; border-radius: 8px; overflow: auto; max-height: 340px; font-size: 12px; }
+  .thumb { display: block; width: 72px; border: 1px solid #d8dce3; border-radius: 3px; background: #fff; }
+  .thumberr { color: #a12b28; font-size: 12px; max-width: 280px; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -179,15 +181,31 @@ export const ADMIN_PANEL_HTML = `<!doctype html>
   }
 
   // ---- template detail + authoring ----
-  function renderDetail(id) {
+  // A version's picker thumbnail (APP-012): the image, and any failure so it can be retried.
+  function thumbCell(v) {
+    var out = '';
+    if (v.thumbnailUrl) {
+      out += '<a href="' + esc(v.thumbnailUrl) + '" target="_blank" rel="noopener">' +
+        '<img class="thumb" src="' + esc(v.thumbnailUrl) + '" alt="v' + v.version + ' thumbnail" /></a>';
+    }
+    if (v.thumbnailError) {
+      out += '<div class="thumberr">' + (v.thumbnailUrl ? 'Last re-render failed: ' : 'Failed: ') + esc(v.thumbnailError) + '</div>';
+    }
+    return out || '<span class="muted">none yet</span>';
+  }
+
+  // flash: optional { kind: 'ok'|'err', text } shown once the view has re-rendered.
+  function renderDetail(id, flash) {
     api('GET', '/admin/templates/' + id).then(function (data) {
       var t = data.template;
       var versionRows = data.versions.map(function (v) {
         return '<tr><td>#' + v.version + '</td>' +
           '<td><span class="pill ' + esc(v.status) + '">' + esc(v.status) + '</span></td>' +
           '<td class="muted">' + esc(v.checksum.slice(0, 12)) + '...</td>' +
+          '<td>' + thumbCell(v) + '</td>' +
           '<td class="row-actions"><button class="small viewv" data-v="' + v.version + '">View JSON</button>' +
           (v.status === 'Published' ? '' : '<button class="small pubv" data-v="' + v.version + '">Publish</button>') +
+          '<button class="small sec regen" data-v="' + v.version + '">' + (v.thumbnailUrl ? 'Re-render' : 'Render') + ' thumbnail</button>' +
           '</td></tr>';
       }).join('');
       root.innerHTML = chrome(
@@ -205,10 +223,11 @@ export const ADMIN_PANEL_HTML = `<!doctype html>
         '<div id="cmsg" class="msg"></div>' +
         '<div id="cjson"></div></div>' +
         '<div class="card"><h3 style="margin-top:0">Versions</h3>' +
-        '<table><thead><tr><th>Version</th><th>Status</th><th>Checksum</th><th></th></tr></thead>' +
-        '<tbody>' + (versionRows || '<tr><td colspan="4" class="muted">No versions yet.</td></tr>') + '</tbody></table></div>'
+        '<table><thead><tr><th>Version</th><th>Status</th><th>Checksum</th><th>Thumbnail</th><th></th></tr></thead>' +
+        '<tbody>' + (versionRows || '<tr><td colspan="5" class="muted">No versions yet.</td></tr>') + '</tbody></table></div>'
       );
       wireChrome();
+      if (flash) showMsg(root.querySelector('#m'), flash.text, flash.kind);
       root.querySelector('#back').onclick = function () { route('list'); };
       root.querySelector('#compile').onclick = function () { doCompile(id); };
       Array.prototype.forEach.call(root.querySelectorAll('.viewv'), function (b) {
@@ -217,9 +236,31 @@ export const ADMIN_PANEL_HTML = `<!doctype html>
       Array.prototype.forEach.call(root.querySelectorAll('.pubv'), function (b) {
         b.onclick = function () {
           if (!confirm('Publish version #' + b.getAttribute('data-v') + '? Published versions are immutable.')) return;
+          b.disabled = true; b.textContent = 'Publishing...';
           api('POST', '/admin/templates/' + id + '/versions/' + b.getAttribute('data-v') + '/publish')
-            .then(function () { route('detail', id); })
-            .catch(function (e) { showMsg(root.querySelector('#m'), e.message, 'err'); });
+            .then(function (r) {
+              var th = r && r.thumbnail;
+              // the publish stands either way; a failed thumbnail is reported, never an error
+              renderDetail(id, th && th.status === 'failed'
+                ? { kind: 'err', text: 'Published v' + r.version + ', but its thumbnail failed: ' + th.error +
+                    ' The picker keeps showing the previous thumbnail until a retry succeeds.' }
+                : { kind: 'ok', text: 'Published v' + r.version + ' and rendered its thumbnail.' });
+            })
+            .catch(function (e) { showMsg(root.querySelector('#m'), e.message, 'err'); b.disabled = false; b.textContent = 'Publish'; });
+        };
+      });
+      Array.prototype.forEach.call(root.querySelectorAll('.regen'), function (b) {
+        b.onclick = function () {
+          var v = b.getAttribute('data-v');
+          b.disabled = true; b.textContent = 'Rendering...';
+          api('POST', '/admin/templates/' + id + '/versions/' + v + '/thumbnail')
+            .then(function (r) {
+              var th = r.thumbnail;
+              renderDetail(id, th.status === 'ok'
+                ? { kind: 'ok', text: 'Rendered the thumbnail for v' + v + '.' }
+                : { kind: 'err', text: 'Thumbnail for v' + v + ' failed: ' + th.error });
+            })
+            .catch(function (e) { showMsg(root.querySelector('#m'), e.message, 'err'); b.disabled = false; b.textContent = 'Retry thumbnail'; });
         };
       });
     }).catch(handleAuthError);

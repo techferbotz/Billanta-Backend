@@ -13,6 +13,7 @@ import {
   createVersion,
   getVersion,
   publishVersion,
+  regenerateThumbnail,
   uploadMedia,
 } from "./controller/admin.controller";
 
@@ -37,6 +38,7 @@ router.delete("/templates/:id", asyncHandler(deleteTemplate));
 router.post("/templates/:id/versions", asyncHandler(createVersion));
 router.get("/templates/:id/versions/:v", asyncHandler(getVersion));
 router.post("/templates/:id/versions/:v/publish", asyncHandler(publishVersion));
+router.post("/templates/:id/versions/:v/thumbnail", asyncHandler(regenerateThumbnail));
 
 router.post("/media", uploadSingleImage, asyncHandler(uploadMedia));
 

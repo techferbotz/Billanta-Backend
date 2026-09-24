@@ -1,9 +1,14 @@
 import crypto from "crypto";
+import { TemplateVersion } from "@prisma/client";
 import { config } from "../../../config/env";
 import {
   templateRepository,
   PublishError,
 } from "../../template/repository/template.repository";
+import {
+  templateThumbnailService,
+  ThumbnailOutcome,
+} from "../../template/service/templateThumbnail.service";
 import { mediaService, MediaResult } from "../../media/service/media.service";
 import { compileTemplate } from "../../../templates/compile/compiler";
 import { CompileError } from "../../../templates/compile/errors";
@@ -16,6 +21,7 @@ import {
 } from "../../../common/errors/AppError";
 import {
   AdminTemplateDto,
+  AdminThumbnailResultDto,
   AdminVersionDetailDto,
   AdminVersionSummaryDto,
   CreateTemplateInput,
@@ -116,12 +122,12 @@ export class AdminTemplateService {
     return toVersionDetail(found);
   }
 
-  async publishVersion(id: string, version: number): Promise<AdminVersionSummaryDto> {
+  async publishVersion(id: string, version: number): Promise<AdminThumbnailResultDto> {
     const found = await templateRepository.findVersion(id, version);
     if (!found) throw new NotFoundError("Template version not found");
+    let published;
     try {
-      const published = await templateRepository.publishVersion(id, found.id);
-      return toVersionSummary(published);
+      published = await templateRepository.publishVersion(id, found.id);
     } catch (err) {
       if (err instanceof PublishError) {
         if (err.reason === "ALREADY_PUBLISHED") throw new ConflictError("Version is already published");
@@ -129,10 +135,29 @@ export class AdminTemplateService {
       }
       throw err;
     }
+    // The publish has committed. Its thumbnail follows and can neither fail nor undo it (APP-012 §5):
+    // afterPublish never throws, and a failure comes back as `thumbnail.status: "failed"`.
+    const thumbnail = await templateThumbnailService.afterPublish(id, published);
+    return this.withThumbnail(published, thumbnail);
   }
 
-  // Admin media (template thumbnails). Reuses the shared media pipeline under a fixed prefix,
-  // since admin uploads aren't owned by a user.
+  /** Re-render a version's thumbnail — the admin panel's retry, and the backfill. */
+  async regenerateThumbnail(id: string, version: number): Promise<AdminThumbnailResultDto> {
+    const found = await templateRepository.findVersion(id, version);
+    if (!found) throw new NotFoundError("Template version not found");
+    const thumbnail = await templateThumbnailService.generate(id, found);
+    return this.withThumbnail(found, thumbnail);
+  }
+
+  // The version re-read after its thumbnail fields changed, plus the outcome.
+  private async withThumbnail(v: TemplateVersion, thumbnail: ThumbnailOutcome): Promise<AdminThumbnailResultDto> {
+    const fresh = (await templateRepository.findVersionById(v.id).catch(() => null)) ?? v;
+    return { ...toVersionSummary(fresh), thumbnail };
+  }
+
+  // Admin media — a manual image upload. Reuses the shared media pipeline under a fixed prefix,
+  // since admin uploads aren't owned by a user. (Picker thumbnails no longer come through here:
+  // they're rendered automatically on publish — see templateThumbnail.service.)
   async uploadMedia(file: { mimeType: string; buffer: Buffer }): Promise<MediaResult> {
     return mediaService.upload("templates", file);
   }

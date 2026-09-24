@@ -256,6 +256,18 @@ model TemplateVersion {
   /// GET /templates/:id/compiled, so an unchanged version returns 304.
   checksum String
 
+  /// The picker thumbnail (APP-012): page 1 rendered with the fixed sample invoice, a public WebP
+  /// in S3 whose key embeds this version number and a hash of its bytes. A DERIVED artifact, set
+  /// after the version exists and regenerable on demand — it is not part of the render tree, so
+  /// setting it never changes `compiled`, `checksum` or the ETag clients cache by. A successful
+  /// render for the CURRENT version is also copied to Template.thumbnailUrl, which is what
+  /// GET /templates serves; a failed one leaves that pointing at the previous version's image.
+  thumbnailUrl   String?
+  /// Why the last generation attempt failed; cleared on success. Surfaced in the admin panel.
+  thumbnailError String?
+  /// When generation was last attempted (success or failure).
+  thumbnailAt    DateTime?
+
   publishedAt DateTime?
 
   createdAt DateTime @default(now())

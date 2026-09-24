@@ -325,6 +325,22 @@ with a small size cap); a missing value means "template defaults". Both are also
   currentVersion, checksum } ], nextCursor, hasMore }` — active templates, **cursor-paginated** like
   the other lists (premium ones included for upsell). Backward-compatible: a small catalogue returns
   one page with `nextCursor: null`.
+  - **`thumbnailUrl`** (APP-012) — a picture of the template, rendered by the server at publish time:
+    page 1 of the current version exactly as an **exported** invoice looks (no `editorOnly` nodes), in
+    its **default theme**, filled with one fixed, fictional sample invoice (every binding populated;
+    `INV-0042`, fixed dates) so the thumbnails compare side by side. **WebP, 640 px wide** at the
+    page's own aspect ratio (A4 → 640×906), edge to edge, **opaque white** — no alpha, frame or
+    shadow. ~20–30 KB.
+  - **Public, no auth — premium templates included.** Their compiled JSON stays gated; the picture of
+    it doesn't. Served straight from S3 with `Cache-Control: public, max-age=31536000, immutable`.
+  - **The URL changes whenever the image does** (the path embeds the version and a hash of the
+    bytes; an object is never replaced under the same URL), so caching an image by URL forever is
+    correct. Publishing a new version changes it; the old URL keeps serving the old image.
+  - It lags only if a render fails: the value then stays on the **previous** version's image (never
+    reverting to `null`) until a retry succeeds. `null` only for a template whose versions have never
+    rendered one.
+  - Rendered by the backend's own renderer from the same compiled tree the app downloads — the same
+    version, not pixel-identical to the app's renderer.
 - `GET /templates/:id` → full detail incl. `currentVersion`, `checksum`, `isActive`.
 - `GET /templates/:id/compiled?version=` → the **Billanta Template JSON** (see
   [`TEMPLATE_JSON.md`](TEMPLATE_JSON.md)) in `data`. Sends an `ETag` (the checksum); repeat with
@@ -364,11 +380,22 @@ sizes and uploaded to S3.
 - `GET /admin/templates` · `POST /admin/templates` (`{ id(slug), name, description?, category?,
   thumbnailUrl?, isPremium?, orderIndex? }`, `201`; `409` if the id exists).
 - `GET /admin/templates/:id` (→ `{ template, versions[] }`) · `PATCH /admin/templates/:id` ·
-  `DELETE /admin/templates/:id`.
+  `DELETE /admin/templates/:id`. Each version summary carries `thumbnailUrl`, `thumbnailError` (the
+  last failure, `null` once a render succeeds) and `thumbnailAt`. A `thumbnailUrl` set by hand through
+  `POST`/`PATCH` is overwritten by the next publish's render.
 - `POST /admin/templates/:id/versions` — `{ html, css }` → **compiles** and stores a Draft version
   (`201`, `data` includes the compiled JSON + checksum). On a bad template: `400`
   `code: "TEMPLATE_COMPILE_FAILED"` with the exact located message; nothing is stored.
 - `GET /admin/templates/:id/versions/:v` → source + compiled JSON.
 - `POST /admin/templates/:id/versions/:v/publish` → makes it the current (immutable) version;
-  archives the previous. `409` if it's already current.
-- `POST /admin/media` — same as `POST /media`, for template thumbnails.
+  archives the previous. `409` if it's already current. Then renders the version's picker thumbnail
+  (≈1 s) and returns the version summary plus
+  `thumbnail: { status: "ok", url, reused } | { status: "failed", error }`. **A thumbnail can never
+  fail the publish:** once the publish commits the response is `200`, and a failed render is reported
+  in `thumbnail` (and shown in the panel) while `GET /templates` keeps the previous image. A version
+  that already has a thumbnail (a rollback, or a draft rendered earlier) reuses it (`reused: true`).
+- `POST /admin/templates/:id/versions/:v/thumbnail` → re-renders that version's thumbnail — the retry
+  (the panel's Render/Re-render button, and `npm run thumbnails:backfill`). Same response shape. Only
+  the **current** version's render changes what `GET /templates` serves.
+- `POST /admin/media` — same as `POST /media`, for a manual image upload. (Picker thumbnails no longer
+  go through it; they're rendered on publish.)

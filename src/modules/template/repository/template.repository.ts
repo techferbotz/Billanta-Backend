@@ -172,6 +172,38 @@ export class TemplateRepository {
       return published;
     });
   }
+
+  // --- thumbnails (APP-012) ---------------------------------------------------------
+  // Derived artifacts about a version, never part of its render tree: writing them leaves
+  // `compiled` / `checksum` untouched, so the "published versions are immutable" rule holds.
+
+  recordThumbnail(versionId: string, url: string): Promise<TemplateVersion> {
+    return prisma.templateVersion.update({
+      where: { id: versionId },
+      data: { thumbnailUrl: url, thumbnailError: null, thumbnailAt: new Date() },
+    });
+  }
+
+  // Keeps any thumbnail the version already had: a failed retry must not blank a working image.
+  recordThumbnailError(versionId: string, message: string): Promise<TemplateVersion> {
+    return prisma.templateVersion.update({
+      where: { id: versionId },
+      data: { thumbnailError: message, thumbnailAt: new Date() },
+    });
+  }
+
+  /**
+   * Make a version's thumbnail the one GET /templates serves — but ONLY while that version is still
+   * the template's current one. A render for v3 that finishes after v4 was published must not paint
+   * v3's picture over v4's. Returns whether it was promoted.
+   */
+  async promoteThumbnail(templateId: string, versionId: string, url: string): Promise<boolean> {
+    const { count } = await prisma.template.updateMany({
+      where: { id: templateId, currentVersionId: versionId },
+      data: { thumbnailUrl: url },
+    });
+    return count === 1;
+  }
 }
 
 // Sentinel thrown inside publishVersion's transaction; the service maps it to a 404/409.

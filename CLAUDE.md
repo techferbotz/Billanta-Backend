@@ -95,6 +95,9 @@ npm run check:auth          # refresh-token rotation + theft detection (in-memor
 npm run check:phase3v       # company/settings/customer validation
 npm run check:compiler      # template compiler: structure, determinism, exact-location rejects
 npm run check:seeds         # every seed template compiles deterministically
+npm run check:thumbnails    # picker-thumbnail renderer: layout rules + seed renders to the APP-012 spec
+npm run thumbnail:render -- --html t.html --css t.css --out t.png   # preview a thumbnail locally
+npm run thumbnails:backfill # render any missing thumbnails via the admin API (needs ADMIN_API_KEY)
 npm run check:money         # invoice calculation fixtures (exact paise)
 npm run check:config        # remote config: strict merge, header parsing, resolve order, fail-fast
 npm run check:legal         # legal pages: required sections, quoted constants, /config links match
@@ -156,11 +159,17 @@ src/
     css/{parser,cascade,properties,units,colors}.ts   # postcss → cascade → resolved absolute styles
     compile/{nodes,bindings,errors,compiler}.ts       # node types, {{binding}} extraction, CompileError, orchestrator
     seed/seedTemplates.ts       # 3 starter templates (also the authoring examples)
+    render/                     # picker thumbnails (APP-012): compiled tree -> 640px WebP
+      layout.ts                 #   pure: tree + data -> element tree (the "dumb renderer" rules)
+      rasterize.ts              #   the ONLY importer of satori + @resvg/resvg-js
+      sampleInvoice.ts          #   the one fixed, fictional dataset every thumbnail renders with
+      renderThumbnail.ts        #   forks thumbnailWorker.ts per render (heap cap + 30s deadline)
   modules/                      # feature modules: routes → controller → service → repository → dto
     auth/ user/ company/ settings/ customer/ invoice/ template/ media/ admin/ legal/
     legal/                      # /privacy /terms /delete-account — HTML rendered from legal.view.ts constants
     remoteConfig/               # GET /config — defaults + env overrides + targeting rules; no DB
   scripts/                      # the check:* verification scripts
+assets/fonts/                   # the app's 5 font families (static TTFs + OFL licences), for thumbnails
 docker-compose.yml              # dev (includes postgres:16)
 docker-compose.prod.yml         # prod (NO postgres; host DB via host.docker.internal; migrate under profile "tools")
 Dockerfile                      # multi-stage builder + runner (non-root)
@@ -217,6 +226,15 @@ Dockerfile                      # multi-stage builder + runner (non-root)
   to the client; server wall-clock is never mixed into it.
 - **Windows dev:** `ts-node-dev` can hold the Prisma query-engine DLL; if `prisma generate` fails
   with `EPERM`, stop stray `ts-node-dev` node processes first.
+- **Thumbnails render in a child process, never in the API server.** The prod box has <1 GB RAM
+  shared across projects; satori + resvg + parsed fonts peak well over 100 MB, so each render forks
+  `thumbnailWorker` and the memory goes back to the OS when it exits. Don't import `rasterize.ts`
+  into the server. satori and resvg are **pinned exactly**: a thumbnail's URL embeds a hash of its
+  bytes, so an upgrade that moves a pixel re-keys every thumbnail on its next render.
+- **Lato and Open Sans have no ₹ glyph** (as distributed by Google Fonts). The renderer always loads
+  Roboto — Android's system font — as the fallback, which mirrors how a phone draws it.
+- **A thumbnail must never fail a publish** (APP-012 §5). `templateThumbnail.service` never throws;
+  failures are recorded on the version and shown in the admin panel with a retry.
 
 ## Build history (phases)
 
@@ -237,3 +255,7 @@ Dockerfile                      # multi-stage builder + runner (non-root)
 8. **Legal pages to protocol 12** — privacy / terms / delete-account rewritten against the real
    codebase (developer Ferbotz, support@ferbotz.com, laws of India), light theme, `APP_PUBLIC_URL`
    as the one origin for `/config` links, and `check:legal` pinning the pages to their constants.
+9. **Picker thumbnails (APP-012 / BE-016)** — every publish renders page 1 of the version from its
+   compiled tree with a fixed sample invoice (satori + resvg in a sandboxed child process), stores a
+   640px WebP in S3 under a content-hashed key, and serves it as `thumbnailUrl`. Per-version
+   thumbnail fields, a retry endpoint + panel button, and `check:thumbnails`.

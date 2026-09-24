@@ -71,6 +71,8 @@ export const getVersion = async (
   sendSuccess(res, await adminTemplateService.getVersion(req.params.id, versionParam(req.params.v)));
 };
 
+// Publishes, then renders the version's picker thumbnail. Always 200 once the publish commits; a
+// thumbnail that failed is reported in `thumbnail`, never as an error.
 export const publishVersion = async (
   req: Request<{ id: string; v: string }>,
   res: Response
@@ -78,7 +80,15 @@ export const publishVersion = async (
   sendSuccess(res, await adminTemplateService.publishVersion(req.params.id, versionParam(req.params.v)));
 };
 
-// POST /admin/media — image -> WebP (two sizes) -> S3 (for template thumbnails).
+// POST /admin/templates/:id/versions/:v/thumbnail — re-render a version's thumbnail (the retry).
+export const regenerateThumbnail = async (
+  req: Request<{ id: string; v: string }>,
+  res: Response
+): Promise<void> => {
+  sendSuccess(res, await adminTemplateService.regenerateThumbnail(req.params.id, versionParam(req.params.v)));
+};
+
+// POST /admin/media — a manual image upload -> WebP (two sizes) -> S3.
 export const uploadMedia = async (req: Request, res: Response): Promise<void> => {
   const file = req.file;
   if (!file) throw new BadRequestError('Expected a multipart form field named "file".');
