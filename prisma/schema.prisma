@@ -455,6 +455,11 @@ model Product {
   taxRatePercent Decimal @default(0)
   /// Free-text unit ("hour", "page", "piece"). Display only for now.
   unit           String?
+  /// The product photo (APP-015): the `url` + `thumbnailUrl` pair from POST /media, exactly like
+  /// Company.logoUrl / logoThumbnailUrl. Deleting the product leaves the S3 objects in place (see
+  /// ProductService.delete).
+  imageUrl          String?
+  imageThumbnailUrl String?
 
   createdAt DateTime @default(now())
   /// Server-managed, exactly as Customer.updatedAt — products aren't in the LWW sync cursor, so

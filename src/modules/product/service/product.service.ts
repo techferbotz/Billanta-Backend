@@ -45,6 +45,9 @@ export class ProductService {
     return toProductDto(product);
   }
 
+  // Deletes the row only. The photo's S3 objects stay, like a replaced logo: one upload can back
+  // several rows (a duplicated product, the same picture used as a logo) and nothing records who
+  // else points at it. They go with the account — the deletion runbook clears media/<userId>/.
   async delete(userId: string, id: string): Promise<void> {
     const deleted = await productRepository.deleteOwn(userId, id);
     if (!deleted) throw new NotFoundError("Product not found");

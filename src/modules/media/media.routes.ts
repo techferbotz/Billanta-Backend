@@ -4,8 +4,8 @@ import { uploadSingleImage } from "../../common/middleware/upload.middleware";
 import { asyncHandler } from "../../common/utils/asyncHandler";
 import { uploadMedia } from "./controller/media.controller";
 
-// Media uploads (logos, signatures, QR images). Auth required. The multer middleware runs
-// before the handler to parse the multipart body into req.file.
+// Media uploads (logos, signatures, QR images, product photos). Auth required. The multer
+// middleware runs before the handler to parse the multipart body into req.file.
 const router = Router();
 
 router.use(authMiddleware);

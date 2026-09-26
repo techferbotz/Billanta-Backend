@@ -89,7 +89,7 @@ export const config = {
     ? Number(process.env.REFRESH_TOKEN_TTL_DAYS)
     : 60,
 
-  // Optional AWS S3 for media (logos, signatures, QR images, template thumbnails).
+  // Optional AWS S3 for media (logos, signatures, QR images, product photos, template thumbnails).
   // When S3_BUCKET or AWS_REGION is unset, media uploads are DISABLED: POST /media
   // returns a clear 503 and every other endpoint keeps working. Credentials come from
   // the AWS default provider chain — the EC2 instance's IAM role in production, so no

@@ -3,7 +3,7 @@ import { config } from "../config/env";
 
 // Isolated AWS S3 access — the ONLY file importing @aws-sdk/client-s3, so the storage
 // vendor stays swappable behind this one boundary. Billanta stores logos, signatures, QR
-// images and template thumbnails here.
+// images, product photos and template thumbnails here.
 //
 // Credentials come from the AWS DEFAULT PROVIDER CHAIN: on EC2 that's the instance's IAM
 // role (no keys in env — the recommended setup); locally it's AWS_ACCESS_KEY_ID/SECRET or

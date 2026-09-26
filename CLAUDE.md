@@ -23,7 +23,7 @@ The backend therefore has exactly four jobs:
    **compiles** them into "Billanta Template JSON" and serves versioned, immutable compiled trees.
 2. **Auth** — Google Sign-In, with short-lived access tokens + rotating refresh tokens.
 3. **Cloud sync** — invoices, customers, company profile and settings for signed-in users.
-4. **Media** — logos, signatures and QR images to object storage.
+4. **Media** — logos, signatures, QR images and product photos to object storage.
 
 ### The one architectural rule everything hangs on
 
@@ -92,7 +92,7 @@ npm run seed:templates      # publish the starter templates (needs DB + migratio
 
 # Verification scripts (no DB needed unless noted):
 npm run check:auth          # refresh-token rotation + theft detection (in-memory)
-npm run check:phase3v       # company/settings/customer validation
+npm run check:phase3v       # company/settings/customer/product validation (incl. photo URLs)
 npm run check:compiler      # template compiler: structure, determinism, exact-location rejects
 npm run check:seeds         # every seed template compiles deterministically
 npm run check:thumbnails    # picker-thumbnail renderer: layout rules + seed renders to the APP-012 spec
@@ -104,7 +104,14 @@ npm run check:legal         # legal pages: required sections, quoted constants, 
 npm run check:phase3        # cross-user isolation           (needs DB + running server)
 npm run check:phase4        # template authoring→serving      (needs DB + running server)
 npm run check:phase5        # invoice CRUD + recompute + sync (needs DB + running server)
+npm run check:products      # product CRUD + photos + isolation (needs DB + running server)
 ```
+
+No Billanta database on this dev box? The Postgres on `localhost:5432` may belong to another
+project, so don't touch it. Instead, spin up a throwaway PG 18 cluster (binaries in
+`C:\Program Files\PostgreSQL\18\bin`): `initdb -D <tmp> -U postgres -A trust`, then
+`pg_ctl -D <tmp> -o "-p 55432" start`, then `createdb`. Point `DATABASE_URL` + `PORT=3100` at it,
+run `prisma migrate deploy`, start the server and run the checks. Stop it and delete `<tmp>` after.
 
 A local Postgres for dev: `docker compose up -d db` (Postgres 16 on `localhost:5432`,
 `billanta`/`billanta`/`billanta`). Then `npm run prisma:migrate:deploy` and `npm run dev`.
@@ -203,7 +210,9 @@ Dockerfile                      # multi-stage builder + runner (non-root)
   schema, the deletion path and the box. When data handling changes — a new synced field, a new
   processor, media cleanup on account deletion, backups — change the pages **in the same commit**,
   bump the effective date, and run `npm run check:legal`. The app shows them from `GET /config`
-  `links.*`, never hard-coded URLs.
+  `links.*`, never hard-coded URLs. **SDKs inside the app count too**, even though this repo can't
+  see them. Firebase Crashlytics and Cloud Messaging are on the pages because of APP-014, so an APP
+  entry that adds or drops an app-side SDK is legal-page work.
 - **Published template versions are immutable.** Editing publishes a NEW version — which is what
   lets clients cache a compiled tree by `(templateId, version)` forever.
 

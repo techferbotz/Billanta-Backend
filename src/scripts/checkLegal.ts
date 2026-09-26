@@ -18,7 +18,9 @@ import assert from "node:assert/strict";
 import { config } from "../config/env";
 import legalRoutes from "../modules/legal/legal.routes";
 import {
+  CRASH_REPORT_RETENTION_DAYS,
   DELETE_ACCOUNT_EFFECTIVE_DATE,
+  FIREBASE_ID_INACTIVE_DAYS,
   LEGAL_APP_NAME,
   LEGAL_COMPANY,
   LEGAL_CONTACT_EMAIL,
@@ -120,7 +122,52 @@ check("covers every section protocol 12 requires", () => {
 });
 
 check("names the processors the code actually uses, and where data lives", () => {
-  includesAll(pages.privacy, ["Google Sign-In", "Amazon Web Services", "Mumbai"], "privacy");
+  includesAll(
+    pages.privacy,
+    [
+      "Google Sign-In",
+      "Amazon Web Services",
+      "Mumbai",
+      // In the Android app (APP-014) — protocol 12 wants every processor named.
+      "Firebase Crashlytics",
+      "Firebase Cloud Messaging",
+      "including outside India",
+    ],
+    "privacy"
+  );
+});
+
+check("says what each Firebase SDK receives, and how long Google keeps it (APP-014)", () => {
+  includesAll(
+    pages.privacy,
+    [
+      "sends a crash report to Firebase Crashlytics",
+      "does not link crash reports to your account",
+      "gives it a registration token",
+      "does not send that token to our servers",
+      "Google also receives your IP address",
+      // Google's wording is "90 days before starting the process of removing it" — never "deleted
+      // after 90 days".
+      `for ${CRASH_REPORT_RETENTION_DAYS} days, after which Google begins deleting them`,
+      `unused for ${FIREBASE_ID_INACTIVE_DAYS} days`,
+      "turn off notifications",
+    ],
+    "privacy"
+  );
+});
+
+check("lists product photos wherever uploaded images are listed (APP-015)", () => {
+  includesAll(
+    pages.privacy,
+    ["photos of your products", "unit and photo", "the photos of products you deleted"],
+    "privacy"
+  );
+  includesAll(pages.terms, ["payment QR image and product photos", "any logo or product photo"], "terms");
+  includesAll(
+    pages.deleteAccount,
+    ["payment QR image and product photos", "photos of products you had deleted"],
+    "delete-account"
+  );
 });
 
 check("quotes the retention constants and the minimum age", () => {
@@ -249,6 +296,9 @@ check("states what is kept, and for how long", () => {
     [
       "What is kept, and for how long",
       `up to <strong>${SERVER_LOG_RETENTION_DAYS} days</strong>`,
+      // Firebase data is per installation, never linked to the account, so deletion can't reach it.
+      `<strong>${CRASH_REPORT_RETENTION_DAYS} days</strong>, then Google begins deleting them`,
+      `<strong>${FIREBASE_ID_INACTIVE_DAYS} days</strong>`,
     ],
     "delete-account"
   );

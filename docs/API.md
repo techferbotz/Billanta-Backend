@@ -167,7 +167,8 @@ Revokes the presented refresh token. Always `200` (silent about unknown tokens).
 - `PATCH /users/me` — body `{ "name"?: string, "photoUrl"?: string|null }` (email/googleId are not
   editable). → the updated profile.
 - `DELETE /users/me` — permanently deletes the account and all its data (cascades to company,
-  customers, invoices, settings, refresh tokens). → `{ }`.
+  customers, products, invoices, settings, refresh tokens). It does **not** remove uploaded images
+  (logo, signature, QR, product photos) from storage. → `{ }`.
 
 ## Company (auth)
 
@@ -259,7 +260,9 @@ decides what "the same product" is (matching on a normalised name and reusing th
 ```json
 // POST /products  (201) — client may supply "id" (uuid); idempotent by (userId,id)
 { "id": "uuid?", "name": "Design hour", "hsnSac": "998314",
-  "unitPrice": "150000", "taxRatePercent": "18", "unit": "hour" }
+  "unitPrice": "150000", "taxRatePercent": "18", "unit": "hour",
+  "imageUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>.webp",
+  "imageThumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>_thumb.webp" }
 ```
 
 | field | type | notes |
@@ -269,10 +272,30 @@ decides what "the same product" is (matching on a normalised name and reusing th
 | `unitPrice` | string | **paise** (integer as a string); absent/null → `"0"` |
 | `taxRatePercent` | string | decimal string, e.g. `"18"`; absent/null → `"0"` |
 | `unit` | string? | free text — "hour", "page", "piece". Display only |
+| `imageUrl` | string? | the photo: the `url` from `POST /media` (≤1280 px WebP) |
+| `imageThumbnailUrl` | string? | the `thumbnailUrl` from the same upload (≤512 px WebP); what a grid shows |
 | `createdAt` / `updatedAt` | ISO-8601 | **server-stamped** (last write to reach the server wins, as with Customers) |
 
 - `GET /products?q=&limit=&cursor=` — `q` matches `name`. → `{ items, nextCursor, hasMore }`.
 - `GET /products/:id` · `PATCH /products/:id` (partial) · `DELETE /products/:id` (**hard** delete).
+
+**Write semantics.** `POST` with a repeated id is a **full replace**: an omitted optional field is
+stored as `null`, the photo included, so a `POST` without `imageUrl`/`imageThumbnailUrl` removes the
+photo. `PATCH` is partial: an absent key leaves that field alone, and an explicit `null` (or `""`)
+clears it. Unknown keys are **ignored**, never rejected. On `POST`, though, a misspelt known key
+reads as omitted and clears that field.
+
+**The photo (APP-015).** Upload the image with `POST /media`, then send its `url` / `thumbnailUrl` as
+`imageUrl` / `imageThumbnailUrl`. They are two independent fields; the app sends them together.
+- **Validation:** each must be an absolute **`https:`** URL of at most **1000** characters, stored
+  exactly as sent (trimmed). Anything else is a `400` and leaves the row untouched. That includes a
+  device-local `file://` or `content://` URI, which no other device could load.
+- **Any https host is accepted,** not only our bucket. That way a URL the server once returned
+  always replays cleanly, even if the storage origin changes.
+- **Responses always carry both keys**, `null` when unset.
+- **`DELETE /products/:id` removes the row only.** The photo's S3 objects stay, like a replaced
+  logo, because one upload can back several rows. They are removed when the account is deleted by
+  email, or when the user asks support. `DELETE /users/me` does not remove uploads either.
 
 ---
 

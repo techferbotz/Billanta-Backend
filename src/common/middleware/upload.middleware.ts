@@ -5,8 +5,9 @@ import { BadRequestError } from "../errors/AppError";
 // straight into sharp for compression and then to S3 — it never needs to touch the
 // filesystem, which also keeps the container's disk read-only-friendly.
 //
-// Media in Billanta is logos, signatures and QR images: small. An 8 MB cap is generous for
-// those while bounding memory use per request.
+// Media in Billanta is logos, signatures, QR images and product photos. An 8 MB cap is generous
+// for all but a full-resolution camera photo (which the app should downscale first; the server
+// keeps ≤1280 px anyway) while bounding memory use per request.
 export const MAX_MEDIA_BYTES = 8 * 1024 * 1024;
 
 const upload = multer({

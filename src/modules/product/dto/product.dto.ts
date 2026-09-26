@@ -1,9 +1,10 @@
 import { Product } from "@prisma/client";
 import { BadRequestError } from "../../../common/errors/AppError";
-import { optionalString, requireString } from "../../../common/validation";
+import { optionalHttpsUrl, optionalString, requireString } from "../../../common/validation";
 
 /// A product as clients see it. `unitPrice` is an integer number of paise as a string, like every
-/// monetary field on the wire; `taxRatePercent` is a decimal string.
+/// monetary field on the wire; `taxRatePercent` is a decimal string. The photo keys are always
+/// present (null when unset): the app reads their presence as "this server knows about photos".
 export interface ProductDto {
   id: string;
   name: string;
@@ -11,6 +12,8 @@ export interface ProductDto {
   unitPrice: string; // paise
   taxRatePercent: string;
   unit: string | null;
+  imageUrl: string | null; // the `url` from POST /media (≤1280 px WebP)
+  imageThumbnailUrl: string | null; // the `thumbnailUrl` from the same upload (≤512 px)
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +26,8 @@ export interface ProductWriteData {
   unitPrice: bigint; // paise
   taxRatePercent: string;
   unit: string | null;
+  imageUrl: string | null;
+  imageThumbnailUrl: string | null;
 }
 
 /// Partial payload for PATCH — only keys the client actually sent appear, so an absent key leaves
@@ -63,6 +68,8 @@ export const toProductDto = (p: Product): ProductDto => ({
   unitPrice: p.unitPrice.toString(),
   taxRatePercent: p.taxRatePercent.toString(),
   unit: p.unit,
+  imageUrl: p.imageUrl,
+  imageThumbnailUrl: p.imageThumbnailUrl,
   createdAt: p.createdAt.toISOString(),
   updatedAt: p.updatedAt.toISOString(),
 });
@@ -78,6 +85,9 @@ export const parseCreateProductBody = (body: Record<string, unknown>): ProductWr
       ? "0"
       : parseDecimal(body.taxRatePercent, "taxRatePercent"),
   unit: optionalString(body.unit, "unit", 40) ?? null,
+  // An omitted photo clears it, like every optional field on a full replace.
+  imageUrl: optionalHttpsUrl(body.imageUrl, "imageUrl") ?? null,
+  imageThumbnailUrl: optionalHttpsUrl(body.imageThumbnailUrl, "imageThumbnailUrl") ?? null,
 });
 
 // Partial parse for PATCH /products/:id — only sets keys the client sent.
@@ -88,5 +98,9 @@ export const parsePatchProductBody = (body: Record<string, unknown>): ProductPat
   if ("unitPrice" in body) data.unitPrice = parsePaise(body.unitPrice, "unitPrice");
   if ("taxRatePercent" in body) data.taxRatePercent = parseDecimal(body.taxRatePercent, "taxRatePercent");
   if ("unit" in body) data.unit = optionalString(body.unit, "unit", 40) ?? null;
+  if ("imageUrl" in body) data.imageUrl = optionalHttpsUrl(body.imageUrl, "imageUrl") ?? null;
+  if ("imageThumbnailUrl" in body) {
+    data.imageThumbnailUrl = optionalHttpsUrl(body.imageThumbnailUrl, "imageThumbnailUrl") ?? null;
+  }
   return data;
 };

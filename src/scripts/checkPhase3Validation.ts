@@ -1,15 +1,22 @@
 /**
- * Pure verification of the Phase 3 validation/parse layer — no DB, no server. Exercises the
- * exact functions the review found bugs in, so each fix has a standing regression check.
+ * Pure verification of the validation/parse layer — no DB, no server. Exercises the exact
+ * functions the Phase 3 review found bugs in, so each fix has a standing regression check, plus
+ * the product photo fields (APP-015).
  *
  * Run: npx ts-node src/scripts/checkPhase3Validation.ts  (or npm run check:phase3v)
  */
+import { Prisma, Product } from "@prisma/client";
 import { AppError } from "../common/errors/AppError";
 import { optionalDecimalString } from "../common/validation";
 import { isValidGstin, reconcileStateCode } from "../common/gstin";
 import { parseCompanyBody } from "../modules/company/dto/company.dto";
 import { parseSettingsBody } from "../modules/settings/dto/settings.dto";
 import { parseCreateCustomerBody, parsePatchCustomerBody } from "../modules/customer/dto/customer.dto";
+import {
+  parseCreateProductBody,
+  parsePatchProductBody,
+  toProductDto,
+} from "../modules/product/dto/product.dto";
 
 let passed = 0;
 let failed = 0;
@@ -94,6 +101,51 @@ console.log("\nHIGH/LOW — settings PUT is now a MERGE: omitted keys are absent
   const clear = parseSettingsBody({ nextInvoiceNumber: null });
   ok("explicit null still clears (present key, null value)", "nextInvoiceNumber" in clear && clear.nextInvoiceNumber === null);
   throws400("nextInvoiceNumber 2.5 rejected (non-integer)", () => parseSettingsBody({ nextInvoiceNumber: 2.5 }));
+}
+
+console.log("\nAPP-015 — product photo: POST is a full replace, PATCH leaves absent keys alone");
+{
+  const IMG = "https://billanta-media.s3.ap-south-1.amazonaws.com/media/u/1.webp";
+  const THUMB = "https://billanta-media.s3.ap-south-1.amazonaws.com/media/u/1_thumb.webp";
+  const both = parseCreateProductBody({ name: "Mug", imageUrl: IMG, imageThumbnailUrl: THUMB });
+  ok("POST with both keys keeps both, exactly as sent", both.imageUrl === IMG && both.imageThumbnailUrl === THUMB);
+  const old = parseCreateProductBody({ name: "Mug", unitPrice: "15000" });
+  ok("an older-style POST body (no photo keys) is accepted, photo null", old.imageUrl === null && old.imageThumbnailUrl === null);
+  ok("unknown keys are ignored, not rejected", parseCreateProductBody({ name: "Mug", colour: "red" }).name === "Mug");
+  ok("whitespace around a URL is trimmed", parseCreateProductBody({ name: "Mug", imageUrl: `  ${IMG} ` }).imageUrl === IMG);
+  ok('"" clears, like any optional string', parseCreateProductBody({ name: "Mug", imageUrl: "" }).imageUrl === null);
+
+  const price = parsePatchProductBody({ unitPrice: 5 });
+  ok("PATCH without the photo keys leaves them out (photo unchanged)", !("imageUrl" in price) && !("imageThumbnailUrl" in price));
+  const clear = parsePatchProductBody({ imageUrl: null, imageThumbnailUrl: null });
+  ok("PATCH with explicit nulls clears both", "imageUrl" in clear && clear.imageUrl === null && clear.imageThumbnailUrl === null);
+  const set = parsePatchProductBody({ imageUrl: IMG, imageThumbnailUrl: THUMB });
+  ok("PATCH with both keys sets both", set.imageUrl === IMG && set.imageThumbnailUrl === THUMB);
+
+  throws400("http:// rejected (https only)", () => parsePatchProductBody({ imageUrl: "http://cdn.example.com/1.webp" }));
+  throws400("a device-local file:// path rejected", () => parsePatchProductBody({ imageUrl: "file:///data/user/0/photo.jpg" }));
+  throws400("a device-local content:// URI rejected", () => parsePatchProductBody({ imageThumbnailUrl: "content://media/external/images/1" }));
+  throws400("a relative path rejected", () => parseCreateProductBody({ name: "Mug", imageUrl: "/media/u/1.webp" }));
+  throws400("a non-URL string rejected", () => parseCreateProductBody({ name: "Mug", imageUrl: "not a url" }));
+  throws400("a number rejected", () => parsePatchProductBody({ imageUrl: 42 }));
+  throws400("over 1000 characters rejected", () => parsePatchProductBody({ imageUrl: `https://cdn.example.com/${"a".repeat(1000)}` }));
+
+  const row: Product = {
+    id: "p1",
+    userId: "u1",
+    name: "Mug",
+    hsnSac: null,
+    unitPrice: 15000n,
+    taxRatePercent: new Prisma.Decimal("18"),
+    unit: null,
+    imageUrl: null,
+    imageThumbnailUrl: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+  const dto = toProductDto(row);
+  ok("the DTO always carries both keys, null when unset (the app's feature probe)", "imageUrl" in dto && dto.imageUrl === null && "imageThumbnailUrl" in dto);
+  ok("the DTO echoes a stored photo", toProductDto({ ...row, imageUrl: IMG, imageThumbnailUrl: THUMB }).imageThumbnailUrl === THUMB);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

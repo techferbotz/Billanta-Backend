@@ -46,6 +46,38 @@ export const optionalString = (
   return trimmed;
 };
 
+/**
+ * Read an optional image URL — in practice one that POST /media issued.
+ *
+ * Same absent/null semantics as optionalString (absent => undefined = leave unchanged; null or
+ * blank => null = clear). A value must be an absolute `https:` URL, which catches a client syncing
+ * a device-local path (`file://`, `content://`) that no other device could load, and anything a
+ * phone would refuse to fetch anyway. Stored exactly as sent (trimmed), never normalised, so the
+ * client reads back the string it wrote.
+ *
+ * Deliberately NOT pinned to the media bucket's origin: a replay of what the server itself
+ * returned must never 400, and pinning would do exactly that to every stored photo the day the
+ * bucket or CDN origin changes.
+ */
+export const optionalHttpsUrl = (
+  value: unknown,
+  field: string,
+  maxLength = 1000
+): string | null | undefined => {
+  const text = optionalString(value, field, maxLength);
+  if (text === undefined || text === null) return text;
+  let url: URL | null = null;
+  try {
+    url = new URL(text);
+  } catch {
+    // Not a URL at all — reported below with the same message as a wrong scheme.
+  }
+  if (!url || url.protocol !== "https:" || url.hostname.length === 0) {
+    throw new BadRequestError(`"${field}" must be an absolute https URL`);
+  }
+  return text;
+};
+
 // Require the request body to be a JSON object (express.json() yields {} for an empty
 // body, and could yield an array or a bare value for a hostile one).
 export const requireObjectBody = (body: unknown): Record<string, unknown> => {

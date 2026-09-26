@@ -6,18 +6,28 @@ import { config } from "../../config/env";
  * `links.*` it receives in GET /config (remoteConfig.defaults.ts builds those from LEGAL_PATHS).
  *
  * THE RULE: only claim what the code does. Every data category, processor and retention period
- * below was checked against the codebase and the production box on 2026-09-24:
- *   - data categories   = prisma/schema.prisma (User, Company, Customer, Product, Invoice + items,
- *                         Settings, RefreshToken) and POST /media (images only, never PDFs)
- *   - processors        = Google (Sign-In; ferbotz.com mail is Google Workspace) and AWS (EC2 host
- *                         + database, S3 media — region ap-south-1, Mumbai)
+ * below was checked against the codebase and the production box on 2026-09-24, and again on
+ * 2026-09-25 for Firebase in the app (APP-014) and product photos (APP-015):
+ *   - data categories   = prisma/schema.prisma (User, Company, Customer, Product incl. its photo,
+ *                         Invoice + items, Settings, RefreshToken) and POST /media (images only,
+ *                         never PDFs)
+ *   - processors        = Google (Sign-In; ferbotz.com mail is Google Workspace), AWS (EC2 host
+ *                         + database, S3 media — region ap-south-1, Mumbai), and Google Firebase
+ *                         inside the Android app: Crashlytics + Cloud Messaging. This repo can't
+ *                         see the app, so those rest on the app's own statement (APP-014: no user
+ *                         id, no custom keys, no invoice/customer/account data attached; the FCM
+ *                         token is never sent to us; no Analytics, no ads; iOS builds have no
+ *                         Firebase — qualify these lines by platform if an iOS app ships) plus
+ *                         Google's own list of what each SDK collects, how long it keeps it and
+ *                         where (firebase.google.com/support/privacy, read 2026-09-25)
  *   - deletion          = the ONLY user-facing route is email (APP-013: the app has in-app deletion
  *                         built but hidden). The operator runbook (docs/DEPLOY.md) removes the S3
  *                         images under media/<userId>/ and then the User row, which cascades every
  *                         user-owned table. DELETE /users/me does the cascade but NOT the images —
  *                         it matters again the day the in-app row ships (see IN-APP DELETION below)
  *   - soft deletes      = invoices are tombstoned (deletedAt) for sync; customers/products are
- *                         hard-deleted
+ *                         hard-deleted, but a deleted product's photo stays in S3 under
+ *                         media/<userId>/ (ProductService.delete), like a replaced logo
  *   - logs              = nginx access log (IP, time, request line, status, user agent), rotated
  *                         daily and kept 14 files (/etc/logrotate.d/nginx); the app's own request log
  *                         (requestLogger: method, URL, status, timing — no IP, no headers) lives in
@@ -42,9 +52,9 @@ export const LEGAL_COMPANY = "Ferbotz";
 export const LEGAL_CONTACT_EMAIL = "support@ferbotz.com";
 
 // ── Per-document — bump on every material change ──
-export const PRIVACY_EFFECTIVE_DATE = "24 September 2026";
-export const TERMS_EFFECTIVE_DATE = "24 September 2026";
-export const DELETE_ACCOUNT_EFFECTIVE_DATE = "24 September 2026";
+export const PRIVACY_EFFECTIVE_DATE = "26 September 2026";
+export const TERMS_EFFECTIVE_DATE = "26 September 2026";
+export const DELETE_ACCOUNT_EFFECTIVE_DATE = "26 September 2026";
 export const TERMS_GOVERNING_LAW = "India";
 // Billanta is a business tool; this is also the age India's DPDP Act treats as adulthood.
 export const MIN_AGE_YEARS = 18;
@@ -57,6 +67,13 @@ export const REQUEST_RESPONSE_DAYS = 30;
 export const SERVER_LOG_RETENTION_DAYS = 14;
 /** A sign-in session's lifetime — imported from what the auth module actually enforces. */
 export const SESSION_LIFETIME_DAYS = config.refreshTokenTtlDays;
+// Google's numbers, not ours (firebase.google.com/support/privacy, read 2026-09-25). Re-check
+// them there whenever these pages are reviewed.
+/** Crashlytics keeps crash data this long "before starting the process of removing it". */
+export const CRASH_REPORT_RETENTION_DAYS = 90;
+/** Google deletes a Firebase installation ID (what Cloud Messaging targets) after this many days
+ *  of inactivity — "currently the threshold". */
+export const FIREBASE_ID_INACTIVE_DAYS = 270;
 
 // ── Public paths ──
 // The routes register these (plus aliases), the pages cross-link with them, and GET /config
@@ -139,7 +156,8 @@ export const renderPrivacyPolicy = (): string => {
     <h2>1. Information We Collect</h2>
     <p><strong>If you don&rsquo;t sign in, we don&rsquo;t receive your invoices or business
     details</strong> &mdash; they stay on your device. The app still contacts our servers to download
-    templates and its settings (see &ldquo;Technical information&rdquo; below).</p>
+    templates and its settings, and uses Google&rsquo;s Firebase to report crashes and to receive
+    notifications (see &ldquo;Technical information&rdquo; below).</p>
     <ul>
       <li><strong>Account information (only if you sign in).</strong> When you sign in with Google we
         receive your email address, name, a link to your profile photo, and Google&rsquo;s identifier
@@ -150,7 +168,7 @@ export const renderPrivacyPolicy = (): string => {
             bank name, account number and IFSC, UPI ID, and your authorised signatory&rsquo;s name
             and designation;</li>
           <li>your customers &mdash; name, phone, email, address and GSTIN;</li>
-          <li>your products &mdash; name, HSN/SAC code, price, tax rate and unit;</li>
+          <li>your products &mdash; name, HSN/SAC code, price, tax rate, unit and photo;</li>
           <li>your invoices &mdash; number, dates, status, line items, amounts, notes, template and
             colour choices, and a copy of your business and customer details as they were when the
             invoice was made;</li>
@@ -158,8 +176,9 @@ export const renderPrivacyPolicy = (): string => {
             default template.</li>
         </ul>
         PDFs are made on your device; we never receive the PDF files.</li>
-      <li><strong>Images you upload.</strong> Your logo, signature and payment QR code, if you add
-        them. We keep a compressed copy so they can appear on your invoices.</li>
+      <li><strong>Images you upload.</strong> Your logo, signature and payment QR code, and photos of
+        your products, if you add them. We keep a compressed copy of each, so that it can appear on
+        your invoices or, for a product photo, in your list of products.</li>
       <li><strong>Technical information.</strong>
         <ul>
           <li>With each request the app sends its platform, version and build number, and a random
@@ -171,6 +190,16 @@ export const renderPrivacyPolicy = (): string => {
             request).</li>
           <li>When you sign in, we record your device&rsquo;s user agent with that sign-in
             session.</li>
+          <li>If the app crashes, it sends a crash report to Firebase Crashlytics, a Google service:
+            technical details of the crash (such as the error and the code that was running),
+            details of your device (such as its model, operating-system version, memory and storage
+            size, and whether it has been rooted), the app&rsquo;s version, and identifiers that
+            Firebase creates for your installation of the app. The app adds none of your invoices,
+            customer details or account information, and does not link crash reports to your
+            account.</li>
+          <li>So that we can send you notifications, the app registers with Firebase Cloud Messaging,
+            a Google service, which identifies your installation of the app and gives it a
+            registration token. The app does not send that token to our servers.</li>
         </ul></li>
     </ul>
     <p>We do not collect payment card details &mdash; ${app} does not process payments.</p>
@@ -179,10 +208,12 @@ export const renderPrivacyPolicy = (): string => {
     <ul>
       <li>To sync and back up your business data, so it is safe and available on your other
         devices.</li>
-      <li>To store the images you upload and show them on your invoices.</li>
+      <li>To store the images you upload and show them on your invoices and in the app.</li>
       <li>To sign you in and keep your account secure.</li>
       <li>To deliver templates and the app&rsquo;s settings for your version of the app.</li>
-      <li>To run, secure and fix the Service, and to answer your support requests.</li>
+      <li>To run, secure and fix the Service &mdash; including using crash reports to find and fix
+        crashes &mdash; and to answer your support requests.</li>
+      <li>To send you notifications about the Service.</li>
       <li>To comply with the law.</li>
     </ul>
     <p>We do not sell your information, use it for advertising, or use it to profile you.</p>
@@ -200,6 +231,11 @@ export const renderPrivacyPolicy = (): string => {
     <ul>
       <li><strong>Google</strong> &mdash; Google Sign-In (only if you choose to sign in), and the email
         service behind our support inbox.</li>
+      <li><strong>Google Firebase</strong> &mdash; <strong>Firebase Crashlytics</strong>, which receives
+        a crash report if the app crashes, and <strong>Firebase Cloud Messaging</strong>, which
+        delivers notifications to the app. Section 1 lists what each receives; neither receives your
+        invoices, customer details or account information. As with any service your phone connects
+        to, Google also receives your IP address, which it handles under its own privacy policy.</li>
       <li><strong>Amazon Web Services (AWS)</strong> &mdash; hosts our servers and database, and stores
         the images you upload.</li>
     </ul>
@@ -211,19 +247,26 @@ export const renderPrivacyPolicy = (): string => {
       <li><strong>Your account and synced data</strong> are kept for as long as your account
         exists.</li>
       <li><strong>Customers and products you delete</strong> are removed from our servers straight
-        away.</li>
+        away, except a deleted product&rsquo;s photo, which is kept with your other images
+        (below).</li>
       <li><strong>Invoices you delete</strong> are marked as deleted rather than erased, so the deletion
         also reaches your other devices. They are erased when you delete your account.</li>
       <li><strong>Sign-in sessions</strong> expire after ${SESSION_LIFETIME_DAYS} days. A record of each
         session (a one-way scrambled copy of its token, its expiry date, and your device&rsquo;s user
         agent) is kept until you delete your account.</li>
-      <li><strong>Images you upload</strong>, including earlier ones you replaced, are kept until you
-        delete your account or ask us to remove them.</li>
+      <li><strong>Images you upload</strong>, including earlier ones you replaced and the photos of
+        products you deleted, are kept until you delete your account or ask us to remove them.</li>
       <li><strong>Web server records</strong> are kept for ${SERVER_LOG_RETENTION_DAYS} days and then
         deleted automatically. Our app server also keeps a basic record of requests (the address
         requested, the result and the timing &mdash; no IP address), which is cleared each time we
         update the Service.</li>
-      <li>The app&rsquo;s platform, version and installation identifier are not stored.</li>
+      <li><strong>Crash reports</strong> are kept by Firebase Crashlytics for
+        ${CRASH_REPORT_RETENTION_DAYS} days, after which Google begins deleting them.</li>
+      <li><strong>The identifier Firebase Cloud Messaging uses</strong> to reach your installation of
+        the app is kept by Google, which currently deletes it once the app has gone unused for
+        ${FIREBASE_ID_INACTIVE_DAYS} days.</li>
+      <li>The platform, version and random installation identifier that the app sends with each
+        request are not stored.</li>
     </ul>
 
     <h2>6. Security</h2>
@@ -233,8 +276,8 @@ export const renderPrivacyPolicy = (): string => {
       <li>Sign-in tokens are stored only as one-way scrambled copies, and the tokens that access your
         data are short-lived.</li>
       <li>Every request can only reach your own account&rsquo;s data.</li>
-      <li>Uploaded images are encrypted in storage. So that they can appear on your invoices, each image
-        is published at a long, random web address: anyone who has that exact address can open the
+      <li>Uploaded images are encrypted in storage. So that they can appear on your invoices and in the
+        app, each image is published at a long, random web address: anyone who has that exact address can open the
         image, but we do not publish or list these addresses anywhere.</li>
     </ul>
     <p>No method of storing or sending data is completely secure, so we cannot guarantee absolute
@@ -253,6 +296,8 @@ export const renderPrivacyPolicy = (): string => {
       <li><strong>ask us</strong> for a copy of your information, to correct or erase it, or to remove
         your uploaded images.</li>
     </ul>
+    <p>With or without an account, you can turn off notifications from ${app} at any time in your
+    phone&rsquo;s settings.</p>
     <p>Depending on the law that applies to you &mdash; including India&rsquo;s Digital Personal Data
     Protection Act, 2023 &mdash; you may have further rights, such as to have a grievance addressed or to
     nominate someone to exercise your rights for you. To use any of these rights, email
@@ -265,8 +310,8 @@ export const renderPrivacyPolicy = (): string => {
 
     <h2>9. Where Your Data Is Stored</h2>
     <p>We store your information in India, in Amazon Web Services&rsquo; Mumbai region. Google handles
-    sign-in and our support email under its own policies, which may involve processing outside
-    India.</p>
+    sign-in, crash reports, notifications and our support email, and may process that information
+    wherever it operates, including outside India.</p>
 
     <h2>10. Changes to This Policy</h2>
     <p>We may update this policy. When we do, we will change the &ldquo;Last updated&rdquo; date above
@@ -299,8 +344,8 @@ export const renderTermsAndConditions = (): string => {
     <p>${app} lets you create, customise and share invoices. Its core features &mdash; creating
     invoices, choosing templates, making PDFs and searching &mdash; work on your device without an
     account. Signing in with Google is optional and adds cloud features: sync and backup of your
-    business data across devices, and storage for your logo, signature and payment QR image. Features
-    and templates may change over time.</p>
+    business data across devices, and storage for your logo, signature, payment QR image and product
+    photos. Features and templates may change over time.</p>
 
     <h2>3. Your Account</h2>
     <p>You sign in with your Google account. You are responsible for keeping it secure and for activity
@@ -332,8 +377,9 @@ export const renderTermsAndConditions = (): string => {
     <p>You own the invoices, customer records, business details and images you create or upload
     (&ldquo;Your Content&rdquo;). You grant us a limited licence to store, copy, process and display
     Your Content only to provide the Service to you &mdash; for example, to sync it and to show your
-    images on your invoices. <strong>You confirm that you have all rights and permissions
-    necessary</strong> for Your Content: that you may use any logo you upload, that a signature you
+    images in the app and on your invoices. <strong>You confirm that you have all rights and
+    permissions necessary</strong> for Your Content: that you may use any logo or product photo you
+    upload, that a signature you
     upload is yours or is used with its owner&rsquo;s consent, and that you may share your
     customers&rsquo; details with us.</p>
 
@@ -364,8 +410,9 @@ export const renderTermsAndConditions = (): string => {
     rights in it except the licence in section 4. The invoices you create with it are yours.</p>
 
     <h2>10. Third-Party Services</h2>
-    <p>The Service relies on third parties, including Google (sign-in, and app distribution through
-    Google Play) and Amazon Web Services (hosting and storage). Your use of their services is subject to
+    <p>The Service relies on third parties, including Google (sign-in, crash reporting and
+    notifications through Firebase, and app distribution through Google Play) and Amazon Web Services
+    (hosting and storage). Your use of their services is subject to
     their terms, and we are not responsible for them &mdash; nor for the payment apps or banks your
     customers use to pay you.</p>
 
@@ -422,9 +469,11 @@ export const renderTermsAndConditions = (): string => {
  *
  * EMAIL ROUTE ONLY while the app's in-app deletion is hidden (APP-013; see IN-APP DELETION above).
  * What is deleted = what the operator runbook in docs/DEPLOY.md removes: every S3 image under
- * media/<userId>/, then the User row, which cascades to Company, Customer, Product, Invoice
- * (+ InvoiceItem, tombstones included), Settings and RefreshToken. What is kept = what survives it:
- * the nginx access logs (SERVER_LOG_RETENTION_DAYS). There are no backups to age out.
+ * media/<userId>/ (product photos included), then the User row, which cascades to Company,
+ * Customer, Product, Invoice (+ InvoiceItem, tombstones included), Settings and RefreshToken. What
+ * is kept = what survives it: the nginx access logs (SERVER_LOG_RETENTION_DAYS), and what Firebase
+ * holds per app installation — crash reports and the Cloud Messaging identifier — which no account
+ * deletion can reach, because the app never links them to the account. No backups to age out.
  */
 export const renderDeleteAccount = (): string => {
   const app = LEGAL_APP_NAME;
@@ -463,8 +512,9 @@ export const renderDeleteAccount = (): string => {
         Google account identifier linked to your ${app} account.</li>
       <li><strong>Your business profile</strong> &mdash; including your address, GSTIN, bank and UPI
         details, and your authorised signatory&rsquo;s name and designation.</li>
-      <li><strong>The images you uploaded</strong> &mdash; your logo, signature and payment QR image,
-        including earlier ones you replaced.</li>
+      <li><strong>The images you uploaded</strong> &mdash; your logo, signature, payment QR image and
+        product photos, including earlier ones you replaced and photos of products you had
+        deleted.</li>
       <li><strong>All your invoices</strong>, including ones you had already deleted, with their line
         items.</li>
       <li><strong>Your customers and products.</strong></li>
@@ -477,6 +527,14 @@ export const renderDeleteAccount = (): string => {
       <li><strong>Web server records</strong> (up to <strong>${SERVER_LOG_RETENTION_DAYS}
         days</strong>) &mdash; technical records of requests, such as IP addresses, that we use to run
         and secure the Service. They are deleted automatically.</li>
+      <li><strong>Crash reports</strong> (<strong>${CRASH_REPORT_RETENTION_DAYS} days</strong>, then
+        Google begins deleting them) &mdash; if ${app} crashed on your phone, the technical report
+        that Google&rsquo;s Firebase Crashlytics received. ${app} adds none of your invoices or
+        business details to it, and it is not linked to your account.</li>
+      <li><strong>The notification identifier</strong> (until ${app} has gone unused for
+        <strong>${FIREBASE_ID_INACTIVE_DAYS} days</strong>) &mdash; the identifier Google&rsquo;s
+        Firebase Cloud Messaging uses to reach your installation of ${app}. It is not linked to your
+        account.</li>
     </ul>
     <p>Some things are outside our control: invoices and data stored on your phone stay there until you
     uninstall ${app} or clear its storage, and invoices you already sent to your customers are theirs
