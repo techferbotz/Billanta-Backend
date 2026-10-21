@@ -1,0 +1,124 @@
+{
+  "company_name": "Kaveri Craft Studio",
+  "company_logo": {
+    "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_logo.webp",
+    "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_logo_thumb.webp"
+  },
+  "company_gstin": "29ABCDE1234F1Z5",
+  "company_pan": "ABCDE1234F",
+  "company_address_line1": "42, 3rd Cross, Indiranagar",
+  "company_address_line2": "HAL 2nd Stage",
+  "company_city": "Bengaluru",
+  "company_state": "29",
+  "company_pincode": "560038",
+  "company_country": "India",
+  "company_phone": "+91 80 4000 0042",
+  "company_email": "hello@kavericraft.example",
+  "company_website": "kavericraft.example",
+  "company_bank_name": "Example Bank",
+  "company_bank_account_name": "Kaveri Craft Studio",
+  "company_bank_account_number": "0042 0042 0042",
+  "company_bank_ifsc": "EXMP0000042",
+  "company_bank_branch": "Indiranagar",
+  "company_upi_id": "kavericraft@example",
+  "company_upi_qr": {
+    "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_upi_qr.webp",
+    "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_upi_qr_thumb.webp"
+  },
+  "company_signature": {
+    "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_signature.webp",
+    "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/company_signature_thumb.webp"
+  },
+  "company_signatory_name": "Ananya Rao",
+  "company_signatory_designation": "Director",
+  "customer": "00000000-0000-4000-8000-000000000042",
+  "customer_name": "Meridian Home Stores LLP",
+  "customer_contact_person": "Rohan Mehta",
+  "customer_phone": "+91 98450 00042",
+  "customer_email": "accounts@meridianhome.example",
+  "customer_gstin": "29PQRSX5678K1Z3",
+  "customer_address_line1": "18, MG Road",
+  "customer_address_line2": "Ashok Nagar",
+  "customer_city": "Bengaluru",
+  "customer_state": "29",
+  "customer_pincode": "560001",
+  "customer_country": "India",
+  "invoice_number": "INV-0042",
+  "invoice_date": "2026-09-01",
+  "due_date": "2026-09-15",
+  "currency": "INR",
+  "po_number": "PO-7781",
+  "discount": {
+    "kind": "flat",
+    "value": "250000",
+    "beforeTax": false
+  },
+  "notes": "Thank you for your business. Please quote INV-0042 with your payment.",
+  "terms": "Payment due within 14 days. Goods once sold are not returnable.",
+  "hide_gst_column": false,
+  "line_items": [
+    {
+      "description": "Brand identity design",
+      "image": {
+        "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image.webp",
+        "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image_thumb.webp"
+      },
+      "hsn_sac": "998391",
+      "unit": "job",
+      "quantity": "1",
+      "unit_price": "4500000",
+      "tax_rate": "18",
+      "line_total": "4500000",
+      "tax_amount": "810000"
+    },
+    {
+      "description": "Printed brochures, A4 (250 pcs)",
+      "image": {
+        "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image.webp",
+        "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image_thumb.webp"
+      },
+      "hsn_sac": "4911",
+      "unit": "pack",
+      "quantity": "2",
+      "unit_price": "650000",
+      "tax_rate": "12",
+      "line_total": "1300000",
+      "tax_amount": "156000"
+    },
+    {
+      "description": "Product photography, half day",
+      "image": {
+        "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image.webp",
+        "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image_thumb.webp"
+      },
+      "hsn_sac": "998386",
+      "unit": "session",
+      "quantity": "1",
+      "unit_price": "1800000",
+      "tax_rate": "18",
+      "line_total": "1800000",
+      "tax_amount": "324000"
+    },
+    {
+      "description": "Kraft paper gift bags",
+      "image": {
+        "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image.webp",
+        "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/00000000-0000-4000-8000-0000000000aa/image_thumb.webp"
+      },
+      "hsn_sac": "4819",
+      "unit": "pcs",
+      "quantity": "200",
+      "unit_price": "1250",
+      "tax_rate": "5",
+      "line_total": "250000",
+      "tax_amount": "12500"
+    }
+  ],
+  "subtotal": "7850000",
+  "discount_total": "250000",
+  "tax_total": "1302500",
+  "cgst_total": "651250",
+  "sgst_total": "651250",
+  "igst_total": "0",
+  "grand_total": "8902500"
+}

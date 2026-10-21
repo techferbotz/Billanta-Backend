@@ -99,50 +99,27 @@ model RefreshToken {
 // Phase 3 — the seller profile, their customers, and per-user settings
 // ---------------------------------------------------------------------------------
 
-/// The seller's business profile — the "from" block printed on every invoice.
+// Server-driven fields (docs/FIELDS.md): company, customer, product, settings, invoice and line
+// rows store their data as `values` — a JSON map of field id -> value, checked against the field
+// registry (src/fields). A new field is a registry/form change, never a migration. The few
+// typed columns beside `values` are DERIVED from it on every write, for search, ordering and
+// uniqueness; `values` is the source of truth.
+
+/// The seller's business profile — the company_* fields printed on every invoice.
 ///
 /// V1 is ONE business per user, so `userId` is `@unique`. That is a deliberate,
 /// reversible choice: to support multiple businesses later, drop the `@unique`, add
 /// `@@unique([userId, id])`, and give Invoice a `companyId`. Nothing else here bakes in
 /// the single-business assumption.
 ///
-/// Every invoice stores a SNAPSHOT of these fields at issue time (Phase 5), so editing the
+/// Every invoice keeps its own COPY of these values (frozen once it's issued), so editing the
 /// profile never rewrites the past — which is why nothing in this model is versioned.
 model Company {
   id     String @id @default(uuid())
   userId String @unique
 
-  name             String
-  logoUrl          String?
-  logoThumbnailUrl String?
-
-  // Tax identity. `gstin`, when present, is validated to the 15-char GSTIN format.
-  // `stateCode` (the 2-digit GST state code) drives the CGST+SGST vs IGST split in Phase 5.
-  gstin     String?
-  stateCode String?
-
-  // Postal address.
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  pincode      String?
-  country      String  @default("India")
-
-  phone String?
-  email String?
-
-  // Payment details shown on the invoice so a customer can pay.
-  signatureUrl      String?
-  // The authorised signatory printed beside the signature image (BE-012). Templates bind these
-  // as signature.name / signature.designation; the image is signature.url (signatureUrl).
-  signatoryName         String?
-  signatoryDesignation  String?
-  upiId             String?
-  qrImageUrl        String?
-  bankName          String?
-  bankAccountNumber String?
-  bankIfsc          String?
+  /// company_* field id -> value.
+  values Json
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -150,7 +127,7 @@ model Company {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-/// A customer the seller bills — the "to" block on an invoice.
+/// A customer the seller bills — the customer_* fields on an invoice.
 ///
 /// The `id` is CLIENT-SUPPLIED (a uuid the Android app generates offline), so a customer
 /// created with no network syncs later without a server round-trip and without id
@@ -160,26 +137,20 @@ model Customer {
   id     String @id @default(uuid())
   userId String
 
-  name  String
-  phone String?
-  email String?
-  gstin String?
+  /// customer_* field id -> value.
+  values Json
 
-  addressLine1 String?
-  addressLine2 String?
-  city         String?
-  state        String?
-  stateCode    String?
-  pincode      String?
-  country      String?
+  // Derived from `values` for search and ordering: `?q=` matches all three.
+  name  String?
+  phone String?
+  gstin String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Search hits these: `?q=` matches name and phone. Both indexes are user-scoped so one
-  // user's search never scans another's rows.
+  // User-scoped so one user's search never scans another's rows.
   @@index([userId, name])
   @@index([userId, phone])
 }
@@ -281,25 +252,16 @@ model TemplateVersion {
 
 /// Per-user defaults that pre-fill the new-invoice screen. Exactly one row per user.
 ///
-/// This is where the running invoice number lives. `nextInvoiceNumber` is a suggestion the
-/// client may use offline; it is NOT the source of truth for uniqueness — that is the
-/// `@@unique([userId, invoiceNumber])` on Invoice in Phase 5. Two offline devices can
-/// legitimately pick the same next number, and the invoice-level constraint is what
-/// catches the collision at sync time.
+/// This is where the running invoice number lives (`settings_next_invoice_number`). It is a
+/// suggestion the client may use offline; it is NOT the source of truth for uniqueness — that is
+/// the `@@unique([userId, invoiceNumber])` on Invoice. Two offline devices can legitimately pick
+/// the same next number, and the invoice-level constraint is what catches the collision at sync.
 model Settings {
   id     String @id @default(uuid())
   userId String @unique
 
-  // ISO 4217. Default INR — the primary market.
-  defaultCurrency   String   @default("INR")
-  // Stored as Decimal, like every tax rate in the app (never a float). Nullable: a seller
-  // who isn't tax-registered has no default rate.
-  defaultTaxPercent Decimal?
-
-  invoiceNumberPrefix String?
-  nextInvoiceNumber   Int?    @default(1)
-  defaultTemplateId   String?
-  defaultNotes        String?
+  /// settings_* field id -> value. Created with the settings form's defaults.
+  values Json
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -317,43 +279,31 @@ enum InvoiceStatus {
   Paid
 }
 
-enum DiscountType {
-  Flat // a fixed amount off (discountValue is in paise)
-  Percentage // a percentage off (discountValue is the percent, e.g. 12.5)
-}
-
 /// An invoice. Created offline on the device, so the `id` is CLIENT-SUPPLIED and all writes
 /// are idempotent by (userId, id). Money is stored as INTEGER PAISE in BigInt columns (never a
-/// float); the server always RECOMPUTES totals from the items via src/common/money.ts and
+/// float); the server always RECOMPUTES totals from the lines via src/common/money.ts and
 /// stores its own result — client-sent totals are advisory.
 model Invoice {
   id     String @id @default(uuid())
   userId String
 
-  /// Optional live reference to the Customer. The invoice does NOT depend on it: the
-  /// customer's details are SNAPSHOTTED below at issue time, so editing (or deleting) the
-  /// customer later never changes a historical invoice.
-  customerId String?
-
-  /// Denormalised snapshots of the buyer and seller AS THEY WERE when the invoice was issued.
-  /// These — not the live Company/Customer rows — are what the template renders against, so an
-  /// invoice is immutable history. JSON because their shape mirrors the client's snapshot.
-  customerSnapshot Json?
-  companySnapshot  Json?
-
-  invoiceNumber String
-  invoiceDate   DateTime
-  dueDate       DateTime?
-  /// ISO 4217. Default INR.
-  currency      String        @default("INR")
-  status        InvoiceStatus @default(Draft)
+  status InvoiceStatus @default(Draft)
 
   /// Which template + exact version this invoice was built with, so it re-renders identically
   /// forever even after the template gets new versions.
   templateId      String
   templateVersion Int
 
-  notes String?
+  /// invoice_* field id -> value, plus this invoice's COPY of the company_* and customer_* values
+  /// it prints. The copy follows the live profile/customer while the invoice is a Draft and is
+  /// frozen once it's issued (the app maintains it), so an invoice re-renders identically forever.
+  values Json
+
+  // Derived from `values` on every write. `invoiceNumber` is NULL when the number is empty or the
+  // invoice is deleted, so the unique index below only binds live, numbered invoices.
+  invoiceNumber String?
+  customerName  String?
+  customerPhone String?
 
   // --- template customisation (opaque to the server; the app applies it at render time) [APP-003] ---
   /// Per-invoice colour overrides: a JSON object mapping a template theme-token name to a hex
@@ -363,14 +313,6 @@ model Invoice {
   /// Section ids the user chose to hide, e.g. `["signature","terms"]`. Null = template defaults.
   /// Validated only as an array of short strings; meaning is entirely the app's.
   hiddenSections Json?
-
-  // --- discount input (what the user chose) ---
-  discountType      DiscountType?
-  /// The raw discount input: the percent for Percentage, or the amount in PAISE for Flat.
-  discountValue     Decimal?
-  /// Whether the discount is applied BEFORE tax (GST-correct, pro-rata across lines) or AFTER
-  /// tax (off the grand total). Togglable per invoice. See src/common/money.ts.
-  discountBeforeTax Boolean       @default(true)
 
   // --- computed totals (server-authoritative, integer paise) ---
   subtotal      BigInt
@@ -397,7 +339,8 @@ model Invoice {
   items InvoiceItem[]
 
   // Two offline devices can pick the same next number; this per-user unique is what catches
-  // the collision at sync time (Settings.nextInvoiceNumber is only a suggestion).
+  // the collision at sync time (settings_next_invoice_number is only a suggestion). Postgres
+  // allows many NULLs, so empty-numbered drafts and deleted invoices never collide.
   @@unique([userId, invoiceNumber])
   @@index([userId, updatedAt])
   @@index([userId, status])
@@ -408,28 +351,27 @@ model Invoice {
 /// A line on an invoice. Money columns are integer paise (BigInt). `taxAmount` and `lineTotal`
 /// are the server's recomputed values, never trusted from the client.
 model InvoiceItem {
+  /// Server-side row id. The client's own line id is `lineId`, so a client can never collide
+  /// with another account's rows through a guessed primary key.
   id        String @id @default(uuid())
   invoiceId String
+  lineId    String
 
   /// Stable ordering within the invoice (the client controls display order).
-  position    Int
-  description String
-  hsnSac      String?
+  position Int
 
-  quantity       Decimal
-  /// Per-unit price in paise.
-  unitPrice      BigInt
-  taxRatePercent Decimal @default(0)
+  /// line field id -> value (description, quantity, unit_price, tax_rate, …).
+  values Json
 
   /// Recomputed: the line's tax in paise (on the post-discount taxable value when the invoice
   /// discounts before tax).
   taxAmount BigInt
-  /// Recomputed: the extended line amount in paise (quantity × unitPrice, pre-discount/pre-tax).
+  /// Recomputed: the extended line amount in paise (quantity × unit_price, pre-discount/pre-tax).
   lineTotal BigInt
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
-  @@index([invoiceId])
+  @@unique([invoiceId, lineId])
 }
 
 // ---------------------------------------------------------------------------------
@@ -437,8 +379,8 @@ model InvoiceItem {
 // ---------------------------------------------------------------------------------
 
 /// A reusable product/service the seller bills, so a line item's description, rate and tax rate
-/// don't have to be retyped. The app remembers a product the moment it's added to an invoice and
-/// offers it when adding the next one.
+/// don't have to be retyped. Its values use the SAME ids as a line item's, so picking a product
+/// copies them into the line; editing the line never writes back.
 ///
 /// Deliberately the SAME shape and rules as Customer: the `id` is CLIENT-SUPPLIED and writes are
 /// idempotent by (userId, id). Products are HARD-deleted (no tombstone) and are NOT part of the
@@ -448,18 +390,12 @@ model Product {
   id     String @id @default(uuid())
   userId String
 
-  name           String
-  hsnSac         String?
-  /// Per-unit price in PAISE (integer, BigInt) — the same money representation as InvoiceItem.
-  unitPrice      BigInt  @default(0)
-  taxRatePercent Decimal @default(0)
-  /// Free-text unit ("hour", "page", "piece"). Display only for now.
-  unit           String?
-  /// The product photo (APP-015): the `url` + `thumbnailUrl` pair from POST /media, exactly like
-  /// Company.logoUrl / logoThumbnailUrl. Deleting the product leaves the S3 objects in place (see
-  /// ProductService.delete).
-  imageUrl          String?
-  imageThumbnailUrl String?
+  /// line field id -> value (description, image, hsn_sac, unit, unit_price, tax_rate). Deleting
+  /// the product leaves its photo's S3 objects in place (see ProductService.delete).
+  values Json
+
+  /// Derived from `values.description`, for search and ordering.
+  name String?
 
   createdAt DateTime @default(now())
   /// Server-managed, exactly as Customer.updatedAt — products aren't in the LWW sync cursor, so

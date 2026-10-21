@@ -1,6 +1,7 @@
 import { MAX_MEDIA_BYTES } from "../../common/middleware/upload.middleware";
 import { MAX_PAGE_SIZE } from "../../common/pagination";
 import { MAX_SYNC_BATCH_INVOICES } from "../invoice/invoice.constants";
+import { MAX_LINE_ITEMS, MAX_LINE_VALUES_BYTES, MAX_VALUES_BYTES } from "../../fields/values";
 import { config } from "../../config/env";
 import { LEGAL_CONTACT_EMAIL, LEGAL_PATHS } from "../legal/legal.view";
 import { RemoteConfig } from "./dto/remoteConfig.dto";
@@ -46,6 +47,9 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
     maxMediaBytes: MAX_MEDIA_BYTES,
     maxSyncBatchInvoices: MAX_SYNC_BATCH_INVOICES,
     maxPageSize: MAX_PAGE_SIZE,
+    maxValuesBytes: MAX_VALUES_BYTES,
+    maxLineValuesBytes: MAX_LINE_VALUES_BYTES,
+    maxLineItems: MAX_LINE_ITEMS,
   },
   // HOA protocol 12: absolute URLs on the one public origin (APP_PUBLIC_URL) + the legal module's
   // own paths, and the contact address imported from the module that renders it — so a link and

@@ -1,5 +1,6 @@
 import { companyRepository } from "../repository/company.repository";
-import { CompanyDto, CompanyWriteData, toCompanyDto } from "../dto/company.dto";
+import { CompanyDto, toCompanyDto } from "../dto/company.dto";
+import { Values } from "../../../fields/values";
 
 export class CompanyService {
   /**
@@ -15,9 +16,12 @@ export class CompanyService {
     return company ? toCompanyDto(company) : null;
   }
 
-  async put(userId: string, data: CompanyWriteData): Promise<CompanyDto> {
-    const company = await companyRepository.upsert(userId, data);
-    return toCompanyDto(company);
+  async put(userId: string, values: Values): Promise<CompanyDto> {
+    return toCompanyDto(await companyRepository.upsert(userId, values));
+  }
+
+  async patch(userId: string, patch: Values): Promise<CompanyDto> {
+    return toCompanyDto(await companyRepository.patch(userId, patch));
   }
 }
 

@@ -6,11 +6,16 @@ import { config } from "../../config/env";
  * `links.*` it receives in GET /config (remoteConfig.defaults.ts builds those from LEGAL_PATHS).
  *
  * THE RULE: only claim what the code does. Every data category, processor and retention period
- * below was checked against the codebase and the production box on 2026-09-24, and again on
- * 2026-09-25 for Firebase in the app (APP-014) and product photos (APP-015):
+ * below was checked against the codebase and the production box on 2026-09-24, again on
+ * 2026-09-25 for Firebase in the app (APP-014) and product photos (APP-015), and on 2026-10-21 for
+ * server-driven fields (docs/FIELDS.md):
  *   - data categories   = prisma/schema.prisma (User, Company, Customer, Product incl. its photo,
  *                         Invoice + items, Settings, RefreshToken) and POST /media (images only,
- *                         never PDFs)
+ *                         never PDFs). Company/Customer/Product/Settings/Invoice store a `values`
+ *                         map whose ids are listed in src/fields/registry.ts — the pages name those
+ *                         categories, plus "other details a template asks for" for invoice fields
+ *                         a template adds (po_number, terms, …). Remembered field values stay on
+ *                         the device (FIELDS.md §8.3) and are never sent to us
  *   - processors        = Google (Sign-In; ferbotz.com mail is Google Workspace), AWS (EC2 host
  *                         + database, S3 media — region ap-south-1, Mumbai), and Google Firebase
  *                         inside the Android app: Crashlytics + Cloud Messaging. This repo can't
@@ -52,7 +57,7 @@ export const LEGAL_COMPANY = "Ferbotz";
 export const LEGAL_CONTACT_EMAIL = "support@ferbotz.com";
 
 // ── Per-document — bump on every material change ──
-export const PRIVACY_EFFECTIVE_DATE = "26 September 2026";
+export const PRIVACY_EFFECTIVE_DATE = "21 October 2026";
 export const TERMS_EFFECTIVE_DATE = "26 September 2026";
 export const DELETE_ACCOUNT_EFFECTIVE_DATE = "26 September 2026";
 export const TERMS_GOVERNING_LAW = "India";
@@ -164,18 +169,21 @@ export const renderPrivacyPolicy = (): string => {
         for your account. We use them to create your account and keep it secure.</li>
       <li><strong>Business data you sync (only while signed in).</strong>
         <ul>
-          <li>your business profile &mdash; business name, address, phone, email, GSTIN and state,
-            bank name, account number and IFSC, UPI ID, and your authorised signatory&rsquo;s name
-            and designation;</li>
-          <li>your customers &mdash; name, phone, email, address and GSTIN;</li>
+          <li>your business profile &mdash; business name, address, state, phone, email, website,
+            GSTIN and PAN, bank name, account name and number, IFSC and branch, UPI ID, and your
+            authorised signatory&rsquo;s name and designation;</li>
+          <li>your customers &mdash; name, contact person, phone, email, address, state and GSTIN;</li>
           <li>your products &mdash; name, HSN/SAC code, price, tax rate, unit and photo;</li>
-          <li>your invoices &mdash; number, dates, status, line items, amounts, notes, template and
-            colour choices, and a copy of your business and customer details as they were when the
-            invoice was made;</li>
-          <li>your invoice settings &mdash; currency, default tax rate, numbering, default notes and
-            default template.</li>
+          <li>your invoices &mdash; number, dates, status, line items, amounts, discount, notes, any
+            other details the invoice&rsquo;s template asks for (such as a purchase order number or
+            terms and conditions), template and colour choices, and a copy of your business and
+            customer details as they were when the invoice was made;</li>
+          <li>your invoice settings &mdash; currency, default tax rate, numbering, default due date,
+            and default notes and terms.</li>
         </ul>
-        PDFs are made on your device; we never receive the PDF files.</li>
+        PDFs are made on your device; we never receive the PDF files. Some details you type, such as
+        how many days an invoice is due in, are remembered on your device to fill in your next
+        invoice; those remembered values are not sent to us.</li>
       <li><strong>Images you upload.</strong> Your logo, signature and payment QR code, and photos of
         your products, if you add them. We keep a compressed copy of each, so that it can appear on
         your invoices or, for a product photo, in your list of products.</li>

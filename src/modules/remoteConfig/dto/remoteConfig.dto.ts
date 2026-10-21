@@ -44,12 +44,15 @@ export interface RemoteConfig {
     message: string | null;
   };
   // Caps the client should respect BEFORE calling the API, so a doomed request is never sent.
-  // The SERVER enforces all three; they are mirrored here from the same constants, never
+  // The SERVER enforces all of them; they are mirrored here from the same constants, never
   // retyped, so the number the app checks cannot drift from the number the server enforces.
   limits: {
     maxMediaBytes: number; // per image on POST /media (upload.middleware)
     maxSyncBatchInvoices: number; // invoices per POST /invoices/sync push (invoice.constants)
     maxPageSize: number; // the ceiling on ?limit for every list endpoint (pagination)
+    maxValuesBytes: number; // one record's `values` map, as JSON (fields/values.ts)
+    maxLineValuesBytes: number; // one line item's `values` map, as JSON (fields/values.ts)
+    maxLineItems: number; // lines on one invoice (fields/values.ts)
   };
   // Absolute URLs, so the app never hard-codes the API host for these.
   links: {

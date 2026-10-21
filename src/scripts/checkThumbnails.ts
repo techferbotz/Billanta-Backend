@@ -20,6 +20,7 @@ import { SAMPLE_INVOICE } from "../templates/render/sampleInvoice";
 import { renderThumbnailPng, THUMBNAIL_WIDTH } from "../templates/render/renderThumbnail";
 import { compressPageThumbnail } from "../storage/imageCompressor";
 import { SEED_TEMPLATES } from "../templates/seed/seedTemplates";
+import { FIELD_IDS } from "../fields/registry";
 
 let passed = 0;
 let failed = 0;
@@ -30,6 +31,16 @@ const check = (name: string, ok: boolean, detail = ""): void => {
 
 const compile = (html: string, css = ""): CompiledTemplate =>
   compileTemplate(`<div data-page-size="A4">${html}</div>`, css).compiled;
+
+// A section that lists `fields`, around `html` — so the html may print them.
+const section = (fields: unknown[], html: string): string =>
+  `<div data-section="s" data-fields='${JSON.stringify(fields)}'>${html}</div>`;
+const LINE_COLUMNS = [
+  { id: "description", label: "Item" },
+  { id: "quantity", type: "number", label: "Qty" },
+  { id: "tax_rate", label: "GST %" },
+  { id: "line_total", label: "Amount" },
+];
 
 // Every element in document order, and the text runs with the element that holds them.
 const elements = (root: Element): Element[] => {
@@ -52,10 +63,27 @@ async function layoutRules(): Promise<void> {
   const editor = renderedText(compile(`<div data-editor-only><div>DRAFT ONLY</div></div><div>visible</div>`));
   check("editorOnly nodes never appear in a thumbnail", editor.includes("visible") && !editor.some((t) => t.includes("DRAFT")));
 
-  const gates = renderedText(compile(
-    `<div data-unless="invoice.notes">NO NOTES</div><div data-if="invoice.notes">{{ invoice.notes }}</div>`));
+  const gates = renderedText(compile(section([{ id: "notes", type: "multiline", label: "Notes" }],
+    `<div data-unless="notes">NO NOTES</div><div data-if="notes">{{ notes }}</div>`)));
   check("data-if / data-unless gate on the sample data", !gates.includes("NO NOTES") &&
     gates.some((t) => t.startsWith("Thank you")));
+
+  const zero = compile(`<div data-if="discount_total">HAS DISCOUNT</div>`);
+  check("a decimal string equal to zero is falsy",
+    renderedText(zero).includes("HAS DISCOUNT") &&
+      !texts(layoutPage(zero, { ...SAMPLE_INVOICE, discount_total: "0.00" }).element).some((t) => t.text === "HAS DISCOUNT"));
+
+  const state = renderedText(compile(section([{ id: "company_state" }], `<div>{{ company_state }}</div>`)));
+  check("a select prints its option's label, not its value", state.includes("Karnataka") && !state.includes("29"),
+    state.join(" | "));
+
+  const missing = Object.entries(FIELD_IDS).filter(([id, spec]) => {
+    if (spec.owner === "settings") return false; // defaults, never printed
+    const line = (SAMPLE_INVOICE.line_items as Record<string, unknown>[])[0];
+    const v = spec.owner === "line" || spec.owner === "line_computed" ? line[id] : SAMPLE_INVOICE[id];
+    return v === undefined || v === null || v === "";
+  }).map(([id]) => id);
+  check("the sample invoice gives every registered field a value", missing.length === 0, missing.join(", "));
 
   const forward = compile(`<div>kept</div>`);
   (forward.root as { children: unknown[] }).children.push({ type: "hologram", style: {} });
@@ -90,17 +118,20 @@ async function layoutRules(): Promise<void> {
   check("a <p> keeps its own margin and padding",
     para?.el.props.style.marginBottom === 6 && para?.el.props.style.paddingTop === 3, JSON.stringify(para?.el.props.style));
 
-  const money = renderedText(compile(`<div>{{ invoice.total | currency }}</div><div>{{ invoice.date | date }}</div>`));
+  const money = renderedText(compile(section([{ id: "invoice_date", label: "Date" }],
+    `<div>{{ grand_total | currency }}</div><div>{{ invoice_date | date }}</div>`)));
   check("currency and date formatting", money.includes("₹89,025.00") && money.includes("01 Sep 2026"), money.join(" | "));
 
-  const table = compile(
+  const table = compile(section([{ id: "line_items", label: "Items", columns: LINE_COLUMNS }],
     `<table class="t"><thead><tr><th class="a">A</th><th>B</th><th>C</th></tr></thead>` +
-      `<tbody><tr data-repeat="items as item"><td>{{ item.description }}</td><td>{{ item.quantity | number }}</td>` +
-      `<td>{{ item.amount | currency }}</td></tr></tbody><tfoot><tr><td colspan="2">x</td><td>y</td></tr></tfoot></table>`,
+      `<tbody><tr data-repeat="line_items as item"><td>{{ item.description }}</td><td>{{ item.quantity | number }}</td>` +
+      `<td>{{ item.line_total | currency }}</td></tr></tbody><tfoot><tr><td colspan="2">x</td><td>y</td></tr></tfoot></table>`),
     `.t { width: 100%; } th.a { width: 50%; }`);
-  const cells = elements(layoutPage(table, SAMPLE_INVOICE).element)
-    .filter((e) => e.props.style.flexShrink === 0 && typeof e.props.style.width === "number")
-    .map((e) => e.props.style.width as number);
+  const cellWidths = (doc: CompiledTemplate, data = SAMPLE_INVOICE) =>
+    elements(layoutPage(doc, data).element)
+      .filter((e) => e.props.style.flexShrink === 0 && typeof e.props.style.width === "number")
+      .map((e) => e.props.style.width as number);
+  const cells = cellWidths(table);
   const inner = PAGE_SIZES.A4.width - table.page.margin.left - table.page.margin.right;
   const [h0, h1, h2] = cells;
   const [f0, f1] = cells.slice(-2);
@@ -108,6 +139,23 @@ async function layoutRules(): Promise<void> {
   check("table columns: explicit width honoured, colspan cells line up with the header",
     cells.length === 3 + 4 * 3 + 2 && close(h0, inner / 2) && close(f0, h0 + h1) && close(f1, h2) && close(h0 + h1 + h2, inner),
     `cells=${cells.length} header=${[h0, h1, h2].map((w) => w?.toFixed(1))} footer=${[f0, f1].map((w) => w?.toFixed(1))}`);
+
+  // A first-row condition hides the whole column; a spanning cell over it shrinks, and the
+  // remaining columns take the full width again.
+  const gst = compile(section(
+    [{ id: "line_items", label: "Items", columns: LINE_COLUMNS }, { id: "hide_gst_column", type: "boolean", label: "Hide GST" }],
+    `<table class="t"><thead><tr><th>Item</th><th data-unless="hide_gst_column">GST</th><th>Amount</th></tr></thead>` +
+      `<tbody><tr data-repeat="line_items as item"><td>{{ item.description }}</td><td>{{ item.tax_rate | number }}%</td>` +
+      `<td>{{ item.line_total | currency }}</td></tr></tbody>` +
+      `<tfoot><tr data-if="discount_total"><td colspan="2">Discount</td><td>d</td></tr><tr><td colspan="2">Total</td><td>t</td></tr></tfoot></table>`),
+    `.t { width: 100%; }`);
+  const shown = cellWidths(gst);
+  const hidden = cellWidths(gst, { ...SAMPLE_INVOICE, hide_gst_column: true, discount_total: "0" });
+  const hiddenText = renderedText(gst).length - texts(layoutPage(gst, { ...SAMPLE_INVOICE, hide_gst_column: true }).element).length;
+  check("a hidden column drops its cells, shrinks spans over it, and frees its width",
+    shown.length === 3 + 4 * 3 + 2 * 2 && hidden.length === 2 + 4 * 2 + 2 && hiddenText === 1 + 4 &&
+      close(hidden.slice(0, 2).reduce((a, b) => a + b, 0), inner) && close(hidden[hidden.length - 2], hidden[0]),
+    `shown=${shown.length} hidden=${hidden.length} hiddenText=${hiddenText}`);
 }
 
 async function seedRenders(): Promise<void> {

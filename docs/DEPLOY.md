@@ -156,6 +156,29 @@ The container **refuses to start** on a bad patch, naming the path
 (`REMOTE_CONFIG_OVERRIDES.features.nope: unknown key`). To undo: remove the line, `up -d app`
 again. See [`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
 
+### The server-driven-fields release (a clean break, run once)
+
+Migration `20261021000000_server_driven_fields` replaces the record tables' typed columns with
+`values` maps ([`FIELDS.md`](FIELDS.md)) and **deletes every company, customer, product, settings and
+invoice row** on the way. It was agreed while the app had no real users; the release also starts
+production from nothing. In order, after confirming with the owner:
+
+1. **Save the template sources** you'll rewrite (`GET /admin/templates/:id/versions/:v` returns
+   `sourceHtml`/`sourceCss`) — the next step deletes them.
+2. **Wipe the data** (stop the app first so nothing writes in between):
+   ```bash
+   docker compose -f docker-compose.prod.yml stop app
+   sudo -u postgres psql -d billanta -c 'TRUNCATE "User", "Template" CASCADE;'
+   ```
+   `CASCADE` reaches every table (refresh tokens, company, customers, products, settings, invoices,
+   lines, template versions). Everyone is signed out.
+3. **Empty the bucket's app prefixes:** `aws s3 rm s3://billanta-media/media/ --recursive` and
+   `aws s3 rm s3://billanta-media/templates/ --recursive`.
+4. **Deploy and migrate** as above (`git pull`, `run --rm --build migrate`, `up -d --build app`).
+5. **Publish the templates** in the new structure (the `new-invoice-template` skill's publish step, or
+   `src/scripts/publishTemplate.ts`), then check `GET /templates`, `GET /forms` and one
+   `GET /templates/:id/compiled` (`schemaVersion: 2`).
+
 ## 7. Legal pages (HOA protocol 12)
 
 `/privacy`, `/terms` and `/delete-account` are served by this backend and handed to the app through

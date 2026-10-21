@@ -21,6 +21,7 @@ import { deepMergeStrict, MergeError } from "../common/deepMerge";
 import { MAX_MEDIA_BYTES } from "../common/middleware/upload.middleware";
 import { MAX_PAGE_SIZE } from "../common/pagination";
 import { MAX_SYNC_BATCH_INVOICES } from "../modules/invoice/invoice.constants";
+import { MAX_LINE_ITEMS, MAX_LINE_VALUES_BYTES, MAX_VALUES_BYTES } from "../fields/values";
 import { ConfigContext, ConfigRule } from "../modules/remoteConfig/dto/remoteConfig.dto";
 import { DEFAULT_REMOTE_CONFIG, TTL_SECONDS } from "../modules/remoteConfig/remoteConfig.defaults";
 import { parseContextHeaders } from "../modules/remoteConfig/remoteConfig.context";
@@ -142,9 +143,9 @@ check("JSON-clean (no undefined), absolute links, positive limits", () => {
     if (key === "supportEmail") assert.match(url, /^[^@\s]+@[^@\s]+$/);
     else assert.match(url, /^https?:\/\//, `links.${key} must be an absolute URL`);
   }
-  assert.ok(DEFAULT_REMOTE_CONFIG.limits.maxMediaBytes > 0);
-  assert.ok(DEFAULT_REMOTE_CONFIG.limits.maxSyncBatchInvoices > 0);
-  assert.ok(DEFAULT_REMOTE_CONFIG.limits.maxPageSize > 0);
+  for (const [key, n] of Object.entries(DEFAULT_REMOTE_CONFIG.limits)) {
+    assert.ok(n > 0, `limits.${key} must be positive`);
+  }
 });
 
 check("day-one defaults = today's behaviour: every switch on, no update requirement", () => {
@@ -160,6 +161,9 @@ check("limits MIRROR the constants the server enforces (never retyped)", () => {
   assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxMediaBytes, MAX_MEDIA_BYTES);
   assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxSyncBatchInvoices, MAX_SYNC_BATCH_INVOICES);
   assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxPageSize, MAX_PAGE_SIZE);
+  assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxValuesBytes, MAX_VALUES_BYTES);
+  assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxLineValuesBytes, MAX_LINE_VALUES_BYTES);
+  assert.equal(DEFAULT_REMOTE_CONFIG.limits.maxLineItems, MAX_LINE_ITEMS);
 });
 
 console.log("\nresolution");

@@ -82,7 +82,8 @@ Live example (today's defaults, verbatim):
       "update": { "minSupportedBuild": 0, "recommendedBuild": 0, "androidStoreUrl": null,
                   "iosStoreUrl": null, "message": null },
       "maintenance": { "enabled": false, "message": null },
-      "limits": { "maxMediaBytes": 8388608, "maxSyncBatchInvoices": 500, "maxPageSize": 100 },
+      "limits": { "maxMediaBytes": 8388608, "maxSyncBatchInvoices": 500, "maxPageSize": 100,
+                  "maxValuesBytes": 65536, "maxLineValuesBytes": 8192, "maxLineItems": 500 },
       "links": { "privacyPolicy": "https://billanta.ferbotz.com/privacy",
                  "terms": "https://billanta.ferbotz.com/terms",
                  "deleteAccount": "https://billanta.ferbotz.com/delete-account",
@@ -117,6 +118,9 @@ value is deliberately flipped.
 | `limits.maxMediaBytes` | `8388608` | Reject an image above this **before** uploading. **Mirrors** `common/middleware/upload.middleware.ts:MAX_MEDIA_BYTES`. |
 | `limits.maxSyncBatchInvoices` | `500` | Chunk a sync push to at most this many invoices. Mirrors `modules/invoice/invoice.constants.ts`. |
 | `limits.maxPageSize` | `100` | The ceiling on `?limit` for every list endpoint. Mirrors `common/pagination.ts:MAX_PAGE_SIZE`. |
+| `limits.maxValuesBytes` | `65536` | A record's `values` map, as JSON bytes (docs/FIELDS.md §7.1). Mirrors `fields/values.ts:MAX_VALUES_BYTES`. |
+| `limits.maxLineValuesBytes` | `8192` | One invoice line's `values`. Mirrors `fields/values.ts:MAX_LINE_VALUES_BYTES`. |
+| `limits.maxLineItems` | `500` | Lines on one invoice. Mirrors `fields/values.ts:MAX_LINE_ITEMS`. |
 | `links.privacyPolicy` / `terms` / `deleteAccount` | absolute URLs | `config.publicUrl` (`APP_PUBLIC_URL`) + `legal/legal.view.ts:LEGAL_PATHS` — the same paths the pages are served on (HOA protocol 12). Use these, never hard-coded URLs; where the app must show them is in §4. |
 | `links.supportEmail` | `support@ferbotz.com` | `legal/legal.view.ts:LEGAL_CONTACT_EMAIL` — the address the pages themselves publish. |
 

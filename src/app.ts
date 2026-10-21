@@ -15,6 +15,7 @@ import invoiceRoutes from "./modules/invoice/invoice.routes";
 import productRoutes from "./modules/product/product.routes";
 import legalRoutes from "./modules/legal/legal.routes";
 import remoteConfigRoutes from "./modules/remoteConfig/remoteConfig.routes";
+import formsRoutes from "./modules/forms/forms.routes";
 
 const app = express();
 
@@ -42,6 +43,11 @@ app.use(legalRoutes);
 // it is a targeting input for future rules. Never touches the database.
 // See docs/REMOTE_CONFIG.md and HOA protocol 10.
 app.use("/config", remoteConfigRoutes);
+
+// --- Forms ------------------------------------------------------------------------
+// GET /forms — the global business profile / customer / product / settings forms the app builds
+// its screens from (docs/FIELDS.md §5). Public and static, like /config.
+app.use("/forms", formsRoutes);
 
 // --- Feature routes ---------------------------------------------------------------
 app.use("/auth", authRoutes); // public: sign in, rotate, log out

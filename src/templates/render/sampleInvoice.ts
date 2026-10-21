@@ -1,12 +1,13 @@
 import { RenderData } from "./layout";
+import { calculateInvoice, deriveGstSplit } from "../../common/money";
 
 // The one fixed, obviously fictional invoice every template thumbnail is rendered with (APP-012 §1).
 //
 // Fixed so that re-rendering an unchanged template yields a byte-identical image (and therefore the
 // same content-hashed URL), and shared so the thumbnails compare side by side. It populates every
-// field in the binding namespace — so whatever sections a template declares, none renders empty —
-// plus the images a template may bind (logo, signature, QR), drawn here as SVG so no real mark,
-// signature or scannable code ever appears.
+// registered field (check:thumbnails asserts it) — so whatever fields a template lists, none renders
+// empty — including the images a template may bind (logo, signature, QR), drawn here as SVG so no
+// real mark, signature or scannable code ever appears.
 //
 // Keep it fictional: `.example` domains (RFC 2606), "Example Bank", documentation-style GSTINs.
 // Changing any value re-renders every thumbnail on its next generation, which is fine — the URL
@@ -55,62 +56,97 @@ const QR = (() => {
   );
 })();
 
-const BANK = { bankName: "Example Bank", accountNumber: "0042 0042 0042", ifsc: "EXMP0000042" };
-const UPI = "kavericraft@example";
+// A plain product swatch, for templates that show a photo on each line.
+const PHOTO = svg(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+    `<rect width="64" height="64" rx="10" fill="#e4e8ee"/>` +
+    `<path d="M14 46 L27 30 L36 40 L42 33 L50 46 Z" fill="#a9b3c1"/><circle cx="44" cy="22" r="5" fill="#a9b3c1"/></svg>`
+);
 
+const image = (url: string) => ({ url, thumbnailUrl: url });
+
+// The lines, as the line values a real invoice stores (money is integer paise, as on the wire).
+const LINES = [
+  { description: "Brand identity design", image: image(PHOTO), hsn_sac: "998391", unit: "job", quantity: "1", unit_price: "4500000", tax_rate: "18" },
+  { description: "Printed brochures, A4 (250 pcs)", image: image(PHOTO), hsn_sac: "4911", unit: "pack", quantity: "2", unit_price: "650000", tax_rate: "12" },
+  { description: "Product photography, half day", image: image(PHOTO), hsn_sac: "998386", unit: "session", quantity: "1", unit_price: "1800000", tax_rate: "18" },
+  { description: "Kraft paper gift bags", image: image(PHOTO), hsn_sac: "4819", unit: "pcs", quantity: "200", unit_price: "1250", tax_rate: "5" },
+];
+
+// A flat ₹2,500 off the total, after tax. The totals come from the real money rules, so the face
+// arithmetic always holds: 78,500.00 + 13,025.00 − 2,500.00 = 89,025.00.
+const DISCOUNT = { kind: "flat", value: "250000", beforeTax: false };
+const TOTALS = calculateInvoice(
+  LINES.map((l) => ({ quantity: l.quantity, unitPrice: Number(l.unit_price), taxRatePercent: l.tax_rate })),
+  { type: "Flat", value: DISCOUNT.value },
+  { discountBeforeTax: DISCOUNT.beforeTax }
+);
+// Seller and buyer are both in Karnataka (29), so the tax splits into CGST + SGST.
+const SPLIT = deriveGstSplit(TOTALS.taxTotal, "29", "29");
+
+// The render context (docs/FIELDS.md §8.1): every registered field with a value.
 export const SAMPLE_INVOICE: RenderData = {
-  company: {
-    name: "Kaveri Craft Studio",
-    gstin: "29ABCDE1234F1Z5",
-    addressLine1: "42, 3rd Cross, Indiranagar",
-    addressLine2: "HAL 2nd Stage",
-    city: "Bengaluru",
-    state: "Karnataka",
-    stateCode: "29",
-    pincode: "560038",
-    country: "India",
-    phone: "+91 80 4000 0042",
-    email: "hello@kavericraft.example",
-    logo: LOGO,
-    signature: SIGNATURE,
-    qr: QR,
-    upiId: UPI,
-    ...BANK,
-  },
-  // Registered in the seller's state (29), so an intra-state CGST + SGST split applies — though no
-  // template can show it yet: the binding namespace carries one `invoice.tax` total.
-  customer: {
-    name: "Meridian Home Stores LLP",
-    gstin: "29PQRSX5678K1Z3",
-    phone: "+91 98450 00042",
-    email: "accounts@meridianhome.example",
-    addressLine1: "18, MG Road",
-    addressLine2: "Ashok Nagar",
-    city: "Bengaluru",
-    state: "Karnataka",
-    stateCode: "29",
-    pincode: "560001",
-  },
-  // Money is integer paise, exactly as on the wire. The face arithmetic holds:
-  // 78,500.00 − 2,500.00 + 13,025.00 = 89,025.00, and each tax line is its item at its rate.
-  invoice: {
-    number: "INV-0042",
-    date: "2026-09-01",
-    dueDate: "2026-09-15",
-    currency: "INR",
-    status: "issued",
-    subtotal: "7850000",
-    discount: "250000",
-    tax: "1302500",
-    total: "8902500",
-    notes: "Thank you for your business. Please quote INV-0042 with your payment.",
-  },
-  items: [
-    { description: "Brand identity design", hsnSac: "998391", quantity: "1", unitPrice: "4500000", taxRate: "18", amount: "4500000" },
-    { description: "Printed brochures, A4 (250 pcs)", hsnSac: "4911", quantity: "2", unitPrice: "650000", taxRate: "12", amount: "1300000" },
-    { description: "Product photography, half day", hsnSac: "998386", quantity: "1", unitPrice: "1800000", taxRate: "18", amount: "1800000" },
-    { description: "Kraft paper gift bags", hsnSac: "4819", quantity: "200", unitPrice: "1250", taxRate: "5", amount: "250000" },
-  ],
-  payment: { upi: UPI, qr: QR, ...BANK },
-  signature: { url: SIGNATURE, name: "Ananya Rao", designation: "Director" },
+  // --- business profile ---
+  company_name: "Kaveri Craft Studio",
+  company_logo: image(LOGO),
+  company_gstin: "29ABCDE1234F1Z5",
+  company_pan: "ABCDE1234F",
+  company_address_line1: "42, 3rd Cross, Indiranagar",
+  company_address_line2: "HAL 2nd Stage",
+  company_city: "Bengaluru",
+  company_state: "29",
+  company_pincode: "560038",
+  company_country: "India",
+  company_phone: "+91 80 4000 0042",
+  company_email: "hello@kavericraft.example",
+  company_website: "kavericraft.example",
+  company_bank_name: "Example Bank",
+  company_bank_account_name: "Kaveri Craft Studio",
+  company_bank_account_number: "0042 0042 0042",
+  company_bank_ifsc: "EXMP0000042",
+  company_bank_branch: "Indiranagar",
+  company_upi_id: "kavericraft@example",
+  company_upi_qr: image(QR),
+  company_signature: image(SIGNATURE),
+  company_signatory_name: "Ananya Rao",
+  company_signatory_designation: "Director",
+
+  // --- customer ---
+  customer: "00000000-0000-4000-8000-000000000042",
+  customer_name: "Meridian Home Stores LLP",
+  customer_contact_person: "Rohan Mehta",
+  customer_phone: "+91 98450 00042",
+  customer_email: "accounts@meridianhome.example",
+  customer_gstin: "29PQRSX5678K1Z3",
+  customer_address_line1: "18, MG Road",
+  customer_address_line2: "Ashok Nagar",
+  customer_city: "Bengaluru",
+  customer_state: "29",
+  customer_pincode: "560001",
+  customer_country: "India",
+
+  // --- invoice ---
+  invoice_number: "INV-0042",
+  invoice_date: "2026-09-01",
+  due_date: "2026-09-15",
+  currency: "INR",
+  po_number: "PO-7781",
+  discount: DISCOUNT,
+  notes: "Thank you for your business. Please quote INV-0042 with your payment.",
+  terms: "Payment due within 14 days. Goods once sold are not returnable.",
+  hide_gst_column: false,
+  line_items: LINES.map((l, i) => ({
+    ...l,
+    line_total: String(TOTALS.lines[i].lineTotal),
+    tax_amount: String(TOTALS.lines[i].taxAmount),
+  })),
+
+  // --- calculated ---
+  subtotal: String(TOTALS.subtotal),
+  discount_total: String(TOTALS.discountTotal),
+  tax_total: String(TOTALS.taxTotal),
+  cgst_total: String(SPLIT.cgst),
+  sgst_total: String(SPLIT.sgst),
+  igst_total: String(SPLIT.igst),
+  grand_total: String(TOTALS.grandTotal),
 };

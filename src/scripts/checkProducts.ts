@@ -1,6 +1,7 @@
 /**
- * End-to-end check of /products: the photo fields (APP-015 acceptance) plus the ownership rules
- * products share with customers, which check:phase3 predates and never covered.
+ * End-to-end check of /products: the values map (line ids, docs/FIELDS.md §7.5), the photo as an
+ * image value (APP-015), plus the ownership rules products share with customers, which check:phase3
+ * predates and never covered.
  *
  * Requires BOTH a reachable, migrated Postgres (DATABASE_URL) and the dev server running on PORT.
  * Run:  npm run dev            (in one shell)
@@ -71,104 +72,80 @@ const main = async (): Promise<void> => {
   const tokenA = generateAccessToken(A.id);
   const tokenB = generateAccessToken(B.id);
 
-  // What POST /media returns, in shape (nothing is fetched).
+  // What POST /media returns, as an image value (nothing is fetched).
   const media = (n: number) => ({
-    imageUrl: `https://billanta-media.s3.ap-south-1.amazonaws.com/media/${A.id}/${n}.webp`,
-    imageThumbnailUrl: `https://billanta-media.s3.ap-south-1.amazonaws.com/media/${A.id}/${n}_thumb.webp`,
+    url: `https://billanta-media.s3.ap-south-1.amazonaws.com/media/${A.id}/${n}.webp`,
+    thumbnailUrl: `https://billanta-media.s3.ap-south-1.amazonaws.com/media/${A.id}/${n}_thumb.webp`,
   });
   const pid = "22222222-2222-4222-8222-222222222222";
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
   try {
-    console.log("\nphoto — APP-015 acceptance");
+    console.log("\nvalues + photo");
     const created = await api(tokenA, "POST", "/products", {
       id: pid,
-      name: "Ceramic mug",
-      unitPrice: "25000",
-      taxRatePercent: "12",
-      ...media(1),
+      values: { description: "Ceramic mug", unit_price: "25000", tax_rate: "12", image: media(1) },
     });
-    check("POST with both photo fields -> 201", created.status === 201, JSON.stringify(created.body));
-    check(
-      "POST echoes both photo fields",
-      data(created)?.imageUrl === media(1).imageUrl &&
-        data(created)?.imageThumbnailUrl === media(1).imageThumbnailUrl
-    );
+    check("POST with a photo -> 201", created.status === 201, JSON.stringify(created.body));
+    check("POST echoes the photo", same(data(created)?.values?.image, media(1)));
     const got = data(await api(tokenA, "GET", `/products/${pid}`));
-    check(
-      "GET /products/:id returns both",
-      got?.imageUrl === media(1).imageUrl && got?.imageThumbnailUrl === media(1).imageThumbnailUrl
-    );
+    check("GET /products/:id returns it", same(got?.values?.image, media(1)) && got?.values?.unit_price === "25000");
     const listed = data(await api(tokenA, "GET", "/products"))?.items?.find((p: any) => p.id === pid);
-    check(
-      "the GET /products page returns both (the app's pull)",
-      listed?.imageUrl === media(1).imageUrl && listed?.imageThumbnailUrl === media(1).imageThumbnailUrl
-    );
+    check("the GET /products page returns it (the app's pull)", same(listed?.values?.image, media(1)));
+    const searched = data(await api(tokenA, "GET", "/products?q=mug"))?.items ?? [];
+    check("?q= matches the description", searched.length === 1 && searched[0].id === pid);
 
-    const priceOnly = data(await api(tokenA, "PATCH", `/products/${pid}`, { unitPrice: "27500" }));
-    check(
-      "PATCH without the keys leaves the photo unchanged",
-      priceOnly?.unitPrice === "27500" && priceOnly?.imageUrl === media(1).imageUrl
-    );
-    const swapped = data(await api(tokenA, "PATCH", `/products/${pid}`, media(2)));
-    check(
-      "PATCH with both keys replaces the photo",
-      swapped?.imageUrl === media(2).imageUrl && swapped?.imageThumbnailUrl === media(2).imageThumbnailUrl
-    );
-    const cleared = data(
-      await api(tokenA, "PATCH", `/products/${pid}`, { imageUrl: null, imageThumbnailUrl: null })
-    );
-    check(
-      "PATCH with both set to null removes them",
-      cleared?.imageUrl === null && cleared?.imageThumbnailUrl === null && cleared?.name === "Ceramic mug"
-    );
+    const priceOnly = data(await api(tokenA, "PATCH", `/products/${pid}`, { values: { unit_price: "27500" } }));
+    check("PATCH without the photo leaves it unchanged",
+      priceOnly?.values?.unit_price === "27500" && same(priceOnly?.values?.image, media(1)));
+    const swapped = data(await api(tokenA, "PATCH", `/products/${pid}`, { values: { image: media(2) } }));
+    check("PATCH with a photo replaces it", same(swapped?.values?.image, media(2)));
+    const cleared = data(await api(tokenA, "PATCH", `/products/${pid}`, { values: { image: null } }));
+    check("PATCH with null removes it", !("image" in (cleared?.values ?? {})) && cleared?.values?.description === "Ceramic mug");
 
-    const legacy = await api(tokenA, "POST", "/products", { name: "Design hour", unitPrice: "150000" });
-    check("an older-style body without the keys is still accepted -> 201", legacy.status === 201);
-    check(
-      "…and comes back WITH both keys, null (the feature probe)",
-      "imageUrl" in (data(legacy) ?? {}) && data(legacy)?.imageUrl === null && data(legacy)?.imageThumbnailUrl === null
-    );
-    const unknown = await api(tokenA, "POST", "/products", { name: "Sticker", colour: "red" });
-    check("an unknown key is ignored, not rejected -> 201", unknown.status === 201);
+    const quantity = await api(tokenA, "POST", "/products", { values: { description: "Sticker", quantity: "2" } });
+    check("a product can't carry a quantity -> 400", quantity.status === 400);
+    const unknown = await api(tokenA, "POST", "/products", { values: { description: "Sticker", colour: "red" } });
+    check("an unknown field id -> 400, never silently dropped", unknown.status === 400);
 
-    console.log("\nphoto — POST is a full replace");
-    await api(tokenA, "PATCH", `/products/${pid}`, media(3));
+    console.log("\nPOST is a full replace");
+    await api(tokenA, "PATCH", `/products/${pid}`, { values: { image: media(3) } });
     const replaced = data(
-      await api(tokenA, "POST", "/products", { id: pid, name: "Ceramic mug", unitPrice: "27500" })
+      await api(tokenA, "POST", "/products", { id: pid, values: { description: "Ceramic mug", unit_price: "27500" } })
     );
-    check("re-POST of the same id without the keys clears the photo", replaced?.imageUrl === null);
+    check("re-POST of the same id without the photo clears it", !("image" in (replaced?.values ?? {})));
 
     console.log("\nphoto — validation (400, row untouched)");
-    await api(tokenA, "PATCH", `/products/${pid}`, media(4));
+    await api(tokenA, "PATCH", `/products/${pid}`, { values: { image: media(4) } });
     for (const [label, bad] of [
-      ["http://", "http://cdn.example.com/1.webp"],
-      ["file://", "file:///data/user/0/com.billanta/files/photo.jpg"],
-      ["content://", "content://media/external/images/media/12"],
-      ["relative path", "/media/u/1.webp"],
-      ["a number", 42],
-      ["over 1000 chars", `https://cdn.example.com/${"a".repeat(1000)}`],
+      ["http://", { url: "http://cdn.example.com/1.webp" }],
+      ["file://", { url: "file:///data/user/0/com.billanta/files/photo.jpg" }],
+      ["content://", { url: "content://media/external/images/media/12" }],
+      ["relative path", { url: "/media/u/1.webp" }],
+      ["a bare string", "https://cdn.example.com/1.webp"],
+      ["over 1000 chars", { url: `https://cdn.example.com/${"a".repeat(1000)}` }],
     ] as const) {
-      const r = await api(tokenA, "PATCH", `/products/${pid}`, { imageUrl: bad });
-      check(`PATCH imageUrl = ${label} -> 400`, r.status === 400, `got ${r.status}`);
+      const r = await api(tokenA, "PATCH", `/products/${pid}`, { values: { image: bad } });
+      check(`PATCH image = ${label} -> 400`, r.status === 400, `got ${r.status}`);
     }
-    const badPost = await api(tokenA, "POST", "/products", { name: "Bad", imageThumbnailUrl: "ftp://x/y.webp" });
+    const badPost = await api(tokenA, "POST", "/products", { values: { description: "Bad", image: { url: "https://x.example/a.webp", thumbnailUrl: "ftp://x/y.webp" } } });
     check("POST with a non-https thumbnail -> 400", badPost.status === 400);
     const intact = data(await api(tokenA, "GET", `/products/${pid}`));
-    check("the rejected writes left the stored photo alone", intact?.imageUrl === media(4).imageUrl);
+    check("the rejected writes left the stored photo alone", same(intact?.values?.image, media(4)));
 
     console.log("\nownership — B can never see or touch A's product (404, never 403)");
     check("B GET A's product -> 404", (await api(tokenB, "GET", `/products/${pid}`)).status === 404);
     check(
       "B PATCH A's product -> 404",
-      (await api(tokenB, "PATCH", `/products/${pid}`, { imageUrl: null })).status === 404
+      (await api(tokenB, "PATCH", `/products/${pid}`, { values: { image: null } })).status === 404
     );
     check("B DELETE A's product -> 404", (await api(tokenB, "DELETE", `/products/${pid}`)).status === 404);
-    const collide = await api(tokenB, "POST", "/products", { id: pid, name: "B tries A's id" });
+    const collide = await api(tokenB, "POST", "/products", { id: pid, values: { description: "B tries A's id" } });
     check("B POST with A's id -> 409 (no overwrite)", collide.status === 409);
     const stillA = data(await api(tokenA, "GET", `/products/${pid}`));
     check(
       "A's product and photo unchanged after B's attempts",
-      stillA?.name === "Ceramic mug" && stillA?.imageUrl === media(4).imageUrl
+      stillA?.values?.description === "Ceramic mug" && same(stillA?.values?.image, media(4))
     );
     check("B's list is empty", data(await api(tokenB, "GET", "/products"))?.items?.length === 0);
 

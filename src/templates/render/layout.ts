@@ -9,7 +9,10 @@ import {
   TemplateNode,
   TextNode,
   Value,
+  VisibleIf,
 } from "../compile/nodes";
+import { FieldDefinition } from "../../fields/types";
+import { OPTION_LISTS } from "../../fields/optionLists";
 
 // Lays a compiled Billanta Template JSON tree out against a dataset, producing the element tree
 // satori rasterises (see rasterize.ts). PURE — no I/O, no dependencies — so it runs anywhere.
@@ -36,6 +39,8 @@ export interface Element {
 }
 type Style = Record<string, string | number>;
 
+// The render context (docs/FIELDS.md §8.1): every field value by id, `line_items` as an array of
+// line maps, and the computed totals.
 export type RenderData = Record<string, unknown>;
 
 // Page sizes in points. The layout works 1pt = 1 unit; rasterize.ts scales to pixels.
@@ -55,6 +60,7 @@ export function layoutPage(doc: CompiledTemplate, data: RenderData): LaidOutPage
   const m = doc.page.margin;
   // The root element's padding is the page margin (the compiler moves it into page.margin).
   const inner = page.width - m.left - m.right;
+  selects = selectLabelsOf(doc);
   const element = el("div", {
     display: "flex",
     flexDirection: "column",
@@ -77,9 +83,54 @@ export function layoutPage(doc: CompiledTemplate, data: RenderData): LaidOutPage
 const lookup = (ctx: RenderData, path: string): unknown =>
   path.split(".").reduce<unknown>((o, k) => (o !== null && typeof o === "object" ? (o as RenderData)[k] : undefined), ctx);
 
-const truthy = (v: unknown): boolean =>
-  !(v === undefined || v === null || v === false || v === "" || v === 0 || v === "0" ||
-    (Array.isArray(v) && v.length === 0));
+// docs/FIELDS.md §6.2: absent, null, false, "", a decimal string equal to zero, an empty array or
+// an empty object is falsy; everything else is truthy.
+const truthy = (v: unknown): boolean => {
+  if (v === undefined || v === null || v === false || v === "" || v === 0) return false;
+  if (typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v)) return Number(v) !== 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v as object).length > 0;
+  return true;
+};
+
+const shows = (cond: VisibleIf | undefined, ctx: RenderData): boolean =>
+  !cond || truthy(lookup(ctx, cond.path)) !== (cond.negate === true);
+
+// A select prints its option's label, not its value (docs/FIELDS.md §4.3). The labels come from
+// the template's own field definitions: top-level fields by id, line-item columns by column id
+// (for a two-segment path inside the repeat).
+interface SelectLabels {
+  fields: Map<string, Map<string, string>>;
+  columns: Map<string, Map<string, string>>;
+}
+let selects: SelectLabels = { fields: new Map(), columns: new Map() };
+
+function selectLabelsOf(doc: CompiledTemplate): SelectLabels {
+  const labels = (f: FieldDefinition): Map<string, string> | undefined => {
+    if (f.type !== "select" || !f.options || !f.id) return undefined;
+    const options = typeof f.options === "string" ? OPTION_LISTS[f.options] ?? [] : f.options;
+    return new Map(options.map((o) => [o.value, o.label]));
+  };
+  const out: SelectLabels = { fields: new Map(), columns: new Map() };
+  for (const section of doc.sections ?? []) {
+    for (const f of section.fields ?? []) {
+      const top = labels(f);
+      if (top) out.fields.set(f.id!, top);
+      for (const c of f.columns ?? []) {
+        const col = labels(c);
+        if (col) out.columns.set(c.id!, col);
+      }
+    }
+  }
+  return out;
+}
+
+function selectLabel(path: string, raw: unknown): unknown {
+  const segments = path.split(".");
+  const map =
+    segments.length === 1 ? selects.fields.get(segments[0]) : segments.length === 2 ? selects.columns.get(segments[1]) : undefined;
+  return map?.get(String(raw)) ?? raw;
+}
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -119,7 +170,7 @@ function valueOf(v: Value | undefined, ctx: RenderData): string {
   if (v.kind === "literal") return v.text;
   if (v.kind === "bind") {
     const raw = lookup(ctx, v.path);
-    const s = raw === undefined || raw === null || raw === "" ? "" : format(raw, v.format);
+    const s = raw === undefined || raw === null || raw === "" ? "" : format(selectLabel(v.path, raw), v.format);
     return s === "" ? v.fallback : s;
   }
   return ""; // an unknown value kind renders nothing (forward-compat)
@@ -288,22 +339,45 @@ function renderImage(n: ImageNode, ctx: RenderData): Element[] {
 
 // --- tables ----------------------------------------------------------------------------
 
+// A row's cells with hidden columns taken out (docs/FIELDS.md §6.3): a cell's span shrinks by the
+// hidden columns it covers, and a cell whose whole span is hidden is dropped. Cells past the end
+// of `columns` (a row wider than the first) are kept as they are.
+function visibleCells(row: RowNode, visible: boolean[]): { cell: CellNode; span: number }[] {
+  const out: { cell: CellNode; span: number }[] = [];
+  let c = 0;
+  for (const cell of row.cells ?? []) {
+    const span = Math.max(1, cell.colSpan || 1);
+    let shown = 0;
+    for (let i = c; i < c + span; i++) if (i >= visible.length || visible[i]) shown++;
+    c += span;
+    if (shown > 0) out.push({ cell, span: shown });
+  }
+  return out;
+}
+
 function renderTable(n: TableNode, ctx: RenderData, available: number): Element {
   const width = n.style?.width !== undefined ? resolveWidth(n.style.width, available) : available;
-  const columns = n.columns.length;
+  const visible = (n.columns ?? []).map((col) => shows(col.visibleIf, ctx));
 
-  // Every row that will render, paired with the data it binds against.
+  // Every row that will render, paired with the data it binds against. A static row with a
+  // `visibleIf` that's off is left out.
   const rows: { row: RowNode; ctx: RenderData }[] = [];
-  for (const row of n.header ?? []) rows.push({ row, ctx });
+  const addStatic = (row: RowNode): void => {
+    if (shows(row.visibleIf, ctx)) rows.push({ row, ctx });
+  };
+  (n.header ?? []).forEach(addStatic);
   if (n.body?.repeat && n.body.row) {
     const items = lookup(ctx, n.body.repeat.path);
     for (const item of Array.isArray(items) ? items : []) {
       rows.push({ row: n.body.row, ctx: { ...ctx, [n.body.repeat.as]: item } });
     }
   } else {
-    for (const row of n.body?.rows ?? []) rows.push({ row, ctx });
+    (n.body?.rows ?? []).forEach(addStatic);
   }
-  for (const row of n.footer ?? []) rows.push({ row, ctx });
+  (n.footer ?? []).forEach(addStatic);
+
+  const laid = rows.map(({ row, ctx: rowCtx }) => ({ row, ctx: rowCtx, cells: visibleCells(row, visible) }));
+  const columns = Math.max(1, ...laid.map((r) => r.cells.reduce((a, c) => a + c.span, 0)));
 
   // Column widths, in points, fixed once so every row's borders line up — including a footer cell
   // that spans columns. The tree's `columns` are "auto" in practice; the author's widths live on the
@@ -312,10 +386,9 @@ function renderTable(n: TableNode, ctx: RenderData, available: number): Element 
   // and borders), which is how a browser's automatic table layout distributes it.
   const fixed: (number | null)[] = new Array(columns).fill(null);
   const want: number[] = new Array(columns).fill(1);
-  for (const { row, ctx: rowCtx } of rows) {
+  for (const { cells, ctx: rowCtx } of laid) {
     let c = 0;
-    for (const cell of row.cells ?? []) {
-      const span = Math.max(1, cell.colSpan || 1);
+    for (const { cell, span } of cells) {
       if (span === 1 && c < columns) {
         const s = cell.style ?? {};
         if (s.width !== undefined && fixed[c] === null) fixed[c] = resolveWidth(s.width, width);
@@ -331,10 +404,9 @@ function renderTable(n: TableNode, ctx: RenderData, available: number): Element 
   const columnWidth = fixed.map((w, i) =>
     w !== null ? w : autoTotal > 0 ? ((width - fixedTotal) * want[i]) / autoTotal : 0);
 
-  const rowElements = rows.map(({ row, ctx: rowCtx }) => {
+  const rowElements = laid.map(({ row, cells: shown, ctx: rowCtx }) => {
     let c = 0;
-    const cells = (row.cells ?? []).map((cell) => {
-      const span = Math.max(1, cell.colSpan || 1);
+    const cells = shown.map(({ cell, span }) => {
       const w = columnWidth.slice(c, c + span).reduce((a, b) => a + b, 0);
       c += span;
       return renderCell(cell, rowCtx, w);

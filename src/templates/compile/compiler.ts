@@ -21,6 +21,7 @@ import {
   ThemeToken,
   SectionDef,
   CustomisationControl,
+  VisibleIf,
 } from "./nodes";
 import { failAt, CompileError, ValueError } from "./errors";
 import { AuthoredElement, AuthoredNode, parseHtml } from "../html/parser";
@@ -33,11 +34,20 @@ import {
   parseRepeatExpression,
   validatePath,
 } from "./bindings";
+import { COMPUTED_IDS, FIELD_ID_PATTERN, LINE_COMPUTED_IDS, fieldSpec } from "../../fields/registry";
+import { FieldError, resolveField } from "../../fields/resolve";
+import { formField } from "../../fields/forms";
+import { FieldDefinition, FieldType } from "../../fields/types";
 
 // The compiler: authored HTML + CSS -> Billanta Template JSON. It parses both inputs,
 // resolves one absolute style per element (the cascade), then walks the tree emitting typed
 // nodes with bindings extracted. Output is deterministic: no clock/random, fixed key order,
 // and a sha256 checksum over the canonical JSON.
+//
+// Since compiler v2 (docs/FIELDS.md §6) a template also declares, per section, the fields its
+// editor shows. The walk records every path the template prints or tests; once it finishes, each
+// is checked against those field lists, so everything on the page can be edited and a typo fails
+// the publish instead of printing blank.
 
 // Tags whose content is a block container.
 const CONTAINER_TAGS = new Set(["div", "ul", "ol"]);
@@ -54,6 +64,8 @@ const INLINE_SPAN_KEYS = [
   "color", "backgroundColor", "fontFamily", "fontSize",
   "fontWeight", "fontStyle", "letterSpacing", "textTransform",
 ];
+// Table parts that are neither rows nor cells: no data-* behaviour attaches to them.
+const TABLE_SECTION_TAGS = new Set(["thead", "tbody", "tfoot"]);
 
 const DEFAULT_MARGIN = 36; // pt, ~0.5in
 const DEFAULT_FONT_FAMILY = "Inter";
@@ -61,22 +73,10 @@ const DEFAULT_FONT_SIZE = 11; // pt
 // A table can't sanely span more columns than this; the cap also bounds deriveColumns' loop
 // so an attacker-controlled colspan can never cause an OOM/hang.
 const MAX_COLSPAN = 64;
-
-// The canonical section vocabulary (APP-003 + APP-007): stable id -> human label, whether the app may
-// hide the block, and `edits` (what data tapping it edits). The ORDER here is the order sections are
-// emitted — i.e. the editor's fill order: details, customer, items, totals, then the optional blocks.
-// An author tags a top-level block with data-section="<id>"; an id outside this list still works
-// (emitted with a derived label, hidable, and no `edits`), so the vocabulary can grow.
-const SECTION_VOCAB: { id: string; label: string; hidable: boolean; edits: string }[] = [
-  { id: "header", label: "Invoice details", hidable: false, edits: "invoiceDetails" },
-  { id: "parties", label: "Bill to", hidable: false, edits: "customer" },
-  { id: "items", label: "Items", hidable: false, edits: "items" },
-  { id: "totals", label: "Total", hidable: false, edits: "discount" },
-  { id: "notes", label: "Notes", hidable: true, edits: "notes" },
-  { id: "payment", label: "Payment details", hidable: true, edits: "bankDetails" },
-  { id: "signature", label: "Signature", hidable: true, edits: "signature" },
-  { id: "terms", label: "Terms", hidable: true, edits: "none" },
-];
+// The one list a template may repeat over (docs/FIELDS.md §6.2).
+const REPEATABLE = "line_items";
+const MAX_FIELDS_PER_SECTION = 64;
+const MAX_SECTION_LABEL = 120;
 
 // Human labels for the colour tokens users recognise; any other token name gets a capitalised
 // fallback so an author can invent a token without editing the compiler.
@@ -87,6 +87,7 @@ const TOKEN_LABELS: Record<string, string> = {
 };
 
 const capitalize = (s: string): string => (s.length ? s[0].toUpperCase() + s.slice(1) : s);
+const humanize = (id: string): string => capitalize(id.replace(/_/g, " "));
 
 // A node's token map with keys in a fixed (sorted) order, so equivalent tagging serializes to
 // identical bytes regardless of author order or how the map was assembled.
@@ -102,14 +103,34 @@ export interface CompileResult {
   compilerVersion: number;
 }
 
-// One compile run. Holds the resolved-style map and the insideRepeat flag so the tree walk
-// can stay a set of small methods.
+// How a path is used, which decides what it may resolve to.
+type PathUse = "print" | "test" | "image" | "repeat";
+
+interface PathRecord {
+  path: string;
+  use: PathUse;
+  scope: string | null; // the data-repeat alias in force, if any
+  line?: number;
+}
+
+// One section's declaration (data-section-label / data-hidable / data-fields on one element).
+interface SectionDecl {
+  label: string;
+  hidable: boolean;
+  fields: FieldDefinition[];
+  line?: number;
+}
+
+// One compile run. Holds the resolved-style map and the collectors the tree walk fills, so the
+// walk can stay a set of small methods.
 class Compiler {
   private readonly styles: Map<AuthoredElement, ResolvedStyle>;
   // Template-customisation collectors, filled by tagNode during the tree walk (APP-003). A Map and
   // a Set both preserve first-occurrence order, so buildTheme/buildSections stay deterministic.
   private readonly themeTokens = new Map<string, string>(); // token name -> default hex
   private readonly sectionsUsed = new Set<string>();
+  private readonly sectionDecls = new Map<string, SectionDecl>();
+  private readonly paths: PathRecord[] = [];
 
   constructor(private readonly root: AuthoredElement, rules: ReturnType<typeof parseCss>) {
     this.styles = resolveStyles(root, rules);
@@ -123,6 +144,10 @@ class Compiler {
     return el.children.some((c) => c.type === "element" && BLOCK_CHILD_TAGS.has(c.tag));
   }
 
+  private record(path: string, use: PathUse, scope: string | null, line?: number): void {
+    this.paths.push({ path, use, scope, line });
+  }
+
   // --- inline spans -----------------------------------------------------------------
   private filterInline(style: ResolvedStyle): ResolvedStyle {
     const out: ResolvedStyle = {};
@@ -131,14 +156,18 @@ class Compiler {
   }
 
   // Collect spans from an inline node (text / span / strong / em / br), merging inline style.
-  private collectSpans(node: AuthoredNode, parentInline: ResolvedStyle): Span[] {
+  private collectSpans(node: AuthoredNode, parentInline: ResolvedStyle, scope: string | null): Span[] {
     if (node.type === "text") {
       const spans = this.wrapText(node.text, node.line);
+      for (const s of spans) {
+        if (s.value.kind === "bind") this.record(s.value.path, "print", scope, node.line);
+      }
       if (Object.keys(parentInline).length === 0) return spans;
       return spans.map((s) => ({ ...s, style: orderStyle({ ...parentInline, ...(s.style ?? {}) }) }));
     }
 
     // element
+    this.rejectDataAttrs(node, ["data-if", "data-unless", "data-repeat"], "an inline element");
     if (node.tag === "br") {
       return [{ value: { kind: "literal", text: "\n" }, ...objIf(orderStyle(parentInline)) }];
     }
@@ -152,7 +181,7 @@ class Compiler {
     const spans: Span[] = [];
     for (const child of node.children) {
       if (child.type === "text" || INLINE_TAGS.has(child.tag)) {
-        spans.push(...this.collectSpans(child, merged));
+        spans.push(...this.collectSpans(child, merged, scope));
       } else {
         // A block element inside inline context is unusual; reject clearly.
         failAt("structure", `<${child.tag}> is not allowed inside <${node.tag}>`, child.line);
@@ -177,9 +206,9 @@ class Compiler {
   // insignificant. A run counts as significant if any span is a binding or a non-whitespace
   // literal; a run of only collapsed whitespace is dropped rather than emitted as a stray " "
   // text node (which would bloat every template's tree).
-  private buildTextNode(nodes: AuthoredNode[], owner: AuthoredElement): TextNode | null {
+  private buildTextNode(nodes: AuthoredNode[], owner: AuthoredElement, scope: string | null): TextNode | null {
     const spans: Span[] = [];
-    for (const n of nodes) spans.push(...this.collectSpans(n, {}));
+    for (const n of nodes) spans.push(...this.collectSpans(n, {}, scope));
 
     const significant = spans.some(
       (s) => s.value.kind === "bind" || s.value.text.trim().length > 0
@@ -190,12 +219,12 @@ class Compiler {
   }
 
   // Compile a run of block-level children, grouping inline content into text nodes.
-  private compileBlockChildren(owner: AuthoredElement, insideRepeat: boolean): TemplateNode[] {
+  private compileBlockChildren(owner: AuthoredElement, scope: string | null): TemplateNode[] {
     const out: TemplateNode[] = [];
     let buffer: AuthoredNode[] = [];
     const flush = (): void => {
       if (buffer.length === 0) return;
-      const text = this.buildTextNode(buffer, owner);
+      const text = this.buildTextNode(buffer, owner, scope);
       if (text) out.push(text);
       buffer = [];
     };
@@ -205,7 +234,7 @@ class Compiler {
         buffer.push(child);
       } else {
         flush();
-        out.push(this.compileWithWrappers(child as AuthoredElement, insideRepeat));
+        out.push(this.compileWithWrappers(child as AuthoredElement, scope));
       }
     }
     flush();
@@ -214,72 +243,94 @@ class Compiler {
 
   // --- element compilation ----------------------------------------------------------
   // Compile an element, then wrap it in repeat/conditional per its data-* attributes.
-  private compileWithWrappers(el: AuthoredElement, insideRepeat: boolean): TemplateNode {
+  private compileWithWrappers(el: AuthoredElement, scope: string | null): TemplateNode {
     const repeatAttr = el.attrs.get("data-repeat");
+    const condition = this.conditionOf(el, scope);
+
+    let innerScope = scope;
+    let repeat: { path: string; as: string } | undefined;
+    if (repeatAttr !== undefined) {
+      repeat = this.parseRepeat(repeatAttr, scope, el.line);
+      innerScope = repeat.as;
+    }
+
+    let node = this.compileElement(el, innerScope);
+    // Attach data-section / data-token / data-editor-only to the element's OWN node, before any
+    // repeat/conditional wrapper (which carries no style or tags). [APP-003 / APP-008]
+    if ("style" in node) this.tagNode(node, el);
+
+    if (repeat) node = { type: "repeat", path: repeat.path, as: repeat.as, child: node };
+    if (condition) {
+      // data-unless is the same gate inverted: render only when the path is FALSY (APP-008).
+      node = condition.negate
+        ? { type: "conditional", path: condition.path, negate: true, child: node }
+        : { type: "conditional", path: condition.path, child: node };
+    }
+    return node;
+  }
+
+  // An element's data-if / data-unless as a VisibleIf (recording the path as tested), or undefined.
+  private conditionOf(el: AuthoredElement, scope: string | null): VisibleIf | undefined {
     const ifAttr = el.attrs.get("data-if");
     const unlessAttr = el.attrs.get("data-unless");
     if (ifAttr !== undefined && unlessAttr !== undefined) {
       failAt("structure", "an element cannot have both data-if and data-unless", el.line);
     }
-
-    let node = this.compileElement(el, insideRepeat || repeatAttr !== undefined);
-    // Attach data-section / data-token / data-editor-only to the element's OWN node, before any
-    // repeat/conditional wrapper (which carries no style or tags). [APP-003 / APP-008]
-    if ("style" in node) this.tagNode(node, el);
-
-    if (repeatAttr !== undefined) {
-      const rb = this.parseRepeat(repeatAttr, el.line);
-      node = { type: "repeat", path: rb.path, as: rb.as, child: node };
-    }
-    if (ifAttr !== undefined) {
-      node = { type: "conditional", path: this.parsePath(ifAttr, el.line), child: node };
-    }
-    if (unlessAttr !== undefined) {
-      // data-unless — the same gate inverted: render only when the path is FALSY (APP-008).
-      node = { type: "conditional", path: this.parsePath(unlessAttr, el.line), negate: true, child: node };
-    }
-    return node;
+    const raw = ifAttr ?? unlessAttr;
+    if (raw === undefined) return undefined;
+    const path = this.parsePath(raw, el.line);
+    this.record(path, "test", scope, el.line);
+    return unlessAttr !== undefined ? { path, negate: true } : { path };
   }
 
-  private compileElement(el: AuthoredElement, insideRepeat: boolean): TemplateNode {
+  private rejectDataAttrs(el: AuthoredElement, names: string[], where: string): void {
+    for (const name of names) {
+      if (el.attrs.has(name)) failAt("structure", `${name} isn't supported on ${where} (<${el.tag}>)`, el.line);
+    }
+  }
+
+  private compileElement(el: AuthoredElement, scope: string | null): TemplateNode {
     const style = this.styleOf(el);
 
     switch (el.tag) {
       case "img":
-        return this.compileImage(el, style);
+        return this.compileImage(el, style, scope);
       case "hr":
         return { type: "divider", style };
       case "table":
-        return this.compileTable(el, insideRepeat);
+        return this.compileTable(el, scope);
       case "ol":
         // Static numbering can't be correct if the list is (or is inside) a data-repeat.
-        if (insideRepeat) {
+        if (scope !== null) {
           failAt("structure", "<ol> cannot be used inside a data-repeat (numbering can't be static)", el.line);
         }
-        return this.compileList(el, insideRepeat, true);
+        return this.compileList(el, scope, true);
       case "ul":
-        return this.compileList(el, insideRepeat, false);
+        return this.compileList(el, scope, false);
       case "div":
-        return { type: "box", style, children: this.compileBlockChildren(el, insideRepeat) };
+        return { type: "box", style, children: this.compileBlockChildren(el, scope) };
       default:
-        // Text-bearing: p, h1-h6, li, td, th, span, strong, em used as a block child.
-        return this.compileTextOrBox(el, insideRepeat);
+        if (TABLE_SECTION_TAGS.has(el.tag) || el.tag === "tr" || el.tag === "td" || el.tag === "th") {
+          failAt("structure", `<${el.tag}> is only allowed inside a <table>`, el.line);
+        }
+        // Text-bearing: p, h1-h6, li, span, strong, em used as a block child.
+        return this.compileTextOrBox(el, scope);
     }
   }
 
-  private compileTextOrBox(el: AuthoredElement, insideRepeat: boolean): TemplateNode {
+  private compileTextOrBox(el: AuthoredElement, scope: string | null): TemplateNode {
     const style = this.styleOf(el);
     if (this.hasBlockChild(el)) {
-      return { type: "box", style, children: this.compileBlockChildren(el, insideRepeat) };
+      return { type: "box", style, children: this.compileBlockChildren(el, scope) };
     }
-    const text = this.buildTextNode(el.children, el);
+    const text = this.buildTextNode(el.children, el, scope);
     // An empty text-bearing element becomes an empty box, so it can still show a border/bg.
     return text ?? { type: "box", style, children: [] };
   }
 
-  private compileImage(el: AuthoredElement, style: ResolvedStyle): ImageNode {
+  private compileImage(el: AuthoredElement, style: ResolvedStyle, scope: string | null): ImageNode {
     const src = el.attrs.get("src");
-    if (!src) failAt("html", "<img> requires a src binding like {{ company.logo }}", el.line);
+    if (!src) failAt("html", "<img> requires a src binding like {{ company_logo.url }}", el.line);
     let source: Value;
     try {
       source = parseSingleBinding(src as string);
@@ -293,12 +344,13 @@ class Compiler {
     if (source.kind === "bind" && source.fallback !== "") {
       failAt("binding", "an <img> source binding may not have a `?? fallback` (it would become an external image URL)", el.line);
     }
+    if (source.kind === "bind") this.record(source.path, "image", scope, el.line);
     const fit: "contain" | "cover" = el.attrs.get("data-fit") === "cover" ? "cover" : "contain";
     return { type: "image", style, source, fit };
   }
 
   // ul/ol -> box of item boxes. For ol, prepend a static "N. " literal to each item's text.
-  private compileList(el: AuthoredElement, insideRepeat: boolean, ordered: boolean): BoxNode {
+  private compileList(el: AuthoredElement, scope: string | null, ordered: boolean): BoxNode {
     const style = this.styleOf(el);
     const children: TemplateNode[] = [];
     let index = 0;
@@ -312,10 +364,17 @@ class Compiler {
       if (child.tag !== "li") {
         failAt("structure", `<${el.tag}> may only contain <li> elements`, child.line);
       }
-      index += 1;
-      const item = this.compileElement(child, insideRepeat);
-      if (ordered) this.prependMarker(item, `${index}. `);
-      children.push(item);
+      if (ordered) {
+        // Numbering is static, so an <ol> item can't come and go.
+        this.rejectDataAttrs(child, ["data-if", "data-unless", "data-repeat"], "an <ol> item");
+        index += 1;
+        const item = this.compileElement(child, scope);
+        if ("style" in item) this.tagNode(item, child);
+        this.prependMarker(item, `${index}. `);
+        children.push(item);
+      } else {
+        children.push(this.compileWithWrappers(child, scope));
+      }
     }
     return { type: "box", style, children };
   }
@@ -330,13 +389,16 @@ class Compiler {
   }
 
   // --- tables -----------------------------------------------------------------------
-  private compileTable(el: AuthoredElement, insideRepeat: boolean): TableNode {
+  private compileTable(el: AuthoredElement, scope: string | null): TableNode {
     const style = this.styleOf(el);
     const sections = { thead: [] as AuthoredElement[], tbody: [] as AuthoredElement[], tfoot: [] as AuthoredElement[] };
     const looseRows: AuthoredElement[] = [];
 
     for (const child of el.children) {
       if (child.type !== "element") continue;
+      if (TABLE_SECTION_TAGS.has(child.tag)) {
+        this.rejectDataAttrs(child, ["data-if", "data-unless", "data-repeat"], "a table section");
+      }
       if (child.tag === "thead") sections.thead.push(...this.rowsOf(child));
       else if (child.tag === "tbody") sections.tbody.push(...this.rowsOf(child));
       else if (child.tag === "tfoot") sections.tfoot.push(...this.rowsOf(child));
@@ -346,12 +408,46 @@ class Compiler {
     // A table with bare <tr>s (no sections) treats them as the body.
     if (looseRows.length) sections.tbody.push(...looseRows);
 
-    const header = sections.thead.map((tr) => this.compileRow(tr, insideRepeat));
-    const footer = sections.tfoot.map((tr) => this.compileRow(tr, insideRepeat));
-    const body = this.compileTableBody(sections.tbody, insideRepeat);
-    const columns = this.deriveColumns(header, body, footer);
+    for (const tr of [...sections.thead, ...sections.tfoot]) {
+      if (tr.attrs.has("data-repeat")) {
+        failAt("structure", "data-repeat on a row is only allowed in the table body", tr.line);
+      }
+    }
+
+    // Column conditions live on the cells of the FIRST row (the same row deriveColumns reads).
+    const firstRow = sections.thead[0] ?? sections.tbody[0] ?? sections.tfoot[0];
+    const columnConditions = firstRow ? this.columnConditions(firstRow, scope) : [];
+    for (const tr of [...sections.thead, ...sections.tbody, ...sections.tfoot]) {
+      if (tr === firstRow) continue;
+      for (const cell of tr.children) {
+        if (cell.type === "element" && (cell.attrs.has("data-if") || cell.attrs.has("data-unless"))) {
+          failAt(
+            "structure",
+            "data-if / data-unless on a cell hides its whole column, so it's only allowed in the table's first row",
+            cell.line
+          );
+        }
+      }
+    }
+
+    const header = sections.thead.map((tr) => this.compileRow(tr, scope, false));
+    const footer = sections.tfoot.map((tr) => this.compileRow(tr, scope, false));
+    const body = this.compileTableBody(sections.tbody, scope);
+    const columns = this.deriveColumns(header, body, footer, columnConditions);
 
     return { type: "table", style, columns, header, body, footer };
+  }
+
+  // The data-if / data-unless on each cell of the first row, expanded over its colspan.
+  private columnConditions(tr: AuthoredElement, scope: string | null): (VisibleIf | undefined)[] {
+    const out: (VisibleIf | undefined)[] = [];
+    for (const cell of tr.children) {
+      if (cell.type !== "element" || (cell.tag !== "td" && cell.tag !== "th")) continue;
+      const condition = this.conditionOf(cell, scope);
+      const span = this.parseColSpan(cell);
+      for (let i = 0; i < span; i++) out.push(condition);
+    }
+    return out;
   }
 
   private rowsOf(section: AuthoredElement): AuthoredElement[] {
@@ -364,7 +460,7 @@ class Compiler {
     return rows;
   }
 
-  private compileTableBody(trs: AuthoredElement[], insideRepeat: boolean): TableBody {
+  private compileTableBody(trs: AuthoredElement[], scope: string | null): TableBody {
     const repeatRows = trs.filter((tr) => tr.attrs.get("data-repeat") !== undefined);
     if (repeatRows.length > 1) {
       failAt("structure", "a table body may have at most one data-repeat row", repeatRows[1].line);
@@ -378,40 +474,47 @@ class Compiler {
         );
       }
       const tr = repeatRows[0];
-      const rb = this.parseRepeat(tr.attrs.get("data-repeat") as string, tr.line);
-      return { repeat: rb, row: this.compileRow(tr, true) };
+      if (tr.attrs.has("data-if") || tr.attrs.has("data-unless")) {
+        failAt("structure", "put data-if / data-unless on the <table>, not on its data-repeat row", tr.line);
+      }
+      const rb = this.parseRepeat(tr.attrs.get("data-repeat") as string, scope, tr.line);
+      return { repeat: rb, row: this.compileRow(tr, rb.as, true) };
     }
-    return { rows: trs.map((tr) => this.compileRow(tr, insideRepeat)) };
+    return { rows: trs.map((tr) => this.compileRow(tr, scope, false)) };
   }
 
-  private compileRow(tr: AuthoredElement, insideRepeat: boolean): RowNode {
+  private compileRow(tr: AuthoredElement, scope: string | null, isRepeatRow: boolean): RowNode {
     const style = this.styleOf(tr);
+    const visibleIf = isRepeatRow ? undefined : this.conditionOf(tr, scope);
     const cells: CellNode[] = [];
     for (const child of tr.children) {
       if (child.type !== "element") continue;
       if (child.tag !== "td" && child.tag !== "th") {
         failAt("structure", `<${child.tag}> is not allowed in <tr>`, child.line);
       }
-      cells.push(this.compileCell(child, insideRepeat));
+      if (child.attrs.has("data-repeat")) failAt("structure", "data-repeat isn't supported on a cell", child.line);
+      cells.push(this.compileCell(child, scope));
     }
-    const node: RowNode = { type: "row", style, cells };
+    const node: RowNode = visibleIf
+      ? { type: "row", style, visibleIf, cells }
+      : { type: "row", style, cells };
     this.tagNode(node, tr);
     return node;
   }
 
-  private compileCell(cell: AuthoredElement, insideRepeat: boolean): CellNode {
+  private compileCell(cell: AuthoredElement, scope: string | null): CellNode {
     const style = this.styleOf(cell);
     const colSpan = this.parseColSpan(cell);
     const children = this.hasBlockChild(cell)
-      ? this.compileBlockChildren(cell, insideRepeat)
-      : this.childrenOfText(cell);
+      ? this.compileBlockChildren(cell, scope)
+      : this.childrenOfText(cell, scope);
     const node: CellNode = { type: "cell", style, colSpan, children };
     this.tagNode(node, cell); // a table header cell is the canonical data-token="backgroundColor:accent" site
     return node;
   }
 
-  private childrenOfText(el: AuthoredElement): TemplateNode[] {
-    const text = this.buildTextNode(el.children, el);
+  private childrenOfText(el: AuthoredElement, scope: string | null): TemplateNode[] {
+    const text = this.buildTextNode(el.children, el, scope);
     return text ? [text] : [];
   }
 
@@ -431,8 +534,14 @@ class Compiler {
   }
 
   // Derive column widths from the first available row. Width comes from each leading cell's
-  // resolved `width` when it's an absolute number of points; otherwise "auto".
-  private deriveColumns(header: RowNode[], body: TableBody, footer: RowNode[]): TableColumn[] {
+  // resolved `width` when it's an absolute number of points; otherwise "auto". A column hidden by
+  // a first-row condition carries it as `visibleIf`.
+  private deriveColumns(
+    header: RowNode[],
+    body: TableBody,
+    footer: RowNode[],
+    conditions: (VisibleIf | undefined)[]
+  ): TableColumn[] {
     const sample =
       header[0] ?? body.row ?? (body.rows && body.rows[0]) ?? footer[0] ?? null;
     if (!sample) return [];
@@ -440,19 +549,32 @@ class Compiler {
     for (const cell of sample.cells) {
       const w = cell.style.width;
       const width: number | "auto" = typeof w === "number" ? w : "auto";
-      for (let i = 0; i < cell.colSpan; i++) columns.push({ width });
+      for (let i = 0; i < cell.colSpan; i++) {
+        const visibleIf = conditions[columns.length];
+        columns.push(visibleIf ? { width, visibleIf } : { width });
+      }
     }
     return columns;
   }
 
   // --- data-* expression parsing (located) ------------------------------------------
-  private parseRepeat(raw: string, line?: number) {
+  private parseRepeat(raw: string, scope: string | null, line?: number): { path: string; as: string } {
+    let rb: { path: string; as: string };
     try {
-      return parseRepeatExpression(raw);
+      rb = parseRepeatExpression(raw);
     } catch (err) {
       if (err instanceof ValueError) failAt("binding", err.message, line);
       throw err;
     }
+    if (rb!.path !== REPEATABLE) {
+      failAt("binding", `data-repeat can only iterate "${REPEATABLE}" (got "${rb!.path}")`, line);
+    }
+    if (scope !== null) failAt("structure", "a data-repeat can't be nested inside another", line);
+    if (fieldSpec(rb!.as)) {
+      failAt("binding", `the data-repeat alias "${rb!.as}" is a field id; use another name, such as "item"`, line);
+    }
+    this.record(rb!.path, "repeat", null, line);
+    return rb!;
   }
 
   private parsePath(raw: string, line?: number): string {
@@ -474,11 +596,13 @@ class Compiler {
     const sectionAttr = el.attrs.get("data-section");
     if (sectionAttr !== undefined) {
       const id = sectionAttr.trim();
-      if (id.length) {
-        node.section = id;
-        this.sectionsUsed.add(id);
+      if (!FIELD_ID_PATTERN.test(id)) {
+        failAt("structure", `section id "${sectionAttr}" must be snake_case, like "payment_details"`, el.line);
       }
+      node.section = id;
+      this.sectionsUsed.add(id);
     }
+    this.declareSection(el, sectionAttr?.trim());
     const tokenAttr = el.attrs.get("data-token");
     if (tokenAttr !== undefined) {
       const tokens = this.parseTokens(tokenAttr, node.style, el.line);
@@ -486,6 +610,60 @@ class Compiler {
     }
     // data-editor-only: mark a node the app shows only while editing and drops from every export (APP-008).
     if (el.attrs.get("data-editor-only") !== undefined) node.editorOnly = true;
+  }
+
+  // Register a section's declaration: data-section-label, data-hidable and data-fields, which go
+  // together on ONE of the elements tagged with that section id.
+  private declareSection(el: AuthoredElement, id: string | undefined): void {
+    const labelAttr = el.attrs.get("data-section-label");
+    const hidableAttr = el.attrs.get("data-hidable");
+    const fieldsAttr = el.attrs.get("data-fields");
+    if (labelAttr === undefined && hidableAttr === undefined && fieldsAttr === undefined) return;
+    if (id === undefined) {
+      failAt("fields", "data-section-label, data-hidable and data-fields need data-section on the same element", el.line);
+    }
+    if (this.sectionDecls.has(id!)) {
+      failAt("fields", `section "${id}" is declared twice; put its label, data-hidable and data-fields on one element`, el.line);
+    }
+
+    let label = humanize(id!);
+    if (labelAttr !== undefined) {
+      if (labelAttr.trim().length === 0 || labelAttr.length > MAX_SECTION_LABEL) {
+        failAt("fields", `data-section-label must be 1–${MAX_SECTION_LABEL} characters`, el.line);
+      }
+      label = labelAttr.trim();
+    }
+    let hidable = true;
+    if (hidableAttr !== undefined) {
+      if (hidableAttr !== "true" && hidableAttr !== "false") {
+        failAt("fields", `data-hidable must be "true" or "false" (got "${hidableAttr}")`, el.line);
+      }
+      hidable = hidableAttr === "true";
+    }
+
+    const fields: FieldDefinition[] = [];
+    if (fieldsAttr !== undefined) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(fieldsAttr);
+      } catch {
+        failAt("fields", `data-fields on section "${id}" must be valid JSON`, el.line);
+      }
+      if (!Array.isArray(parsed)) failAt("fields", `data-fields on section "${id}" must be a JSON array`, el.line);
+      const raw = parsed as unknown[];
+      if (raw.length > MAX_FIELDS_PER_SECTION) {
+        failAt("fields", `section "${id}" has more than ${MAX_FIELDS_PER_SECTION} fields`, el.line);
+      }
+      for (const item of raw) {
+        try {
+          fields.push(resolveField(item, { place: "template", inherited: formField }));
+        } catch (err) {
+          if (err instanceof FieldError) failAt("fields", `section "${id}": ${err.message}`, el.line);
+          throw err;
+        }
+      }
+    }
+    this.sectionDecls.set(id!, { label, hidable, fields, line: el.line });
   }
 
   // Parse `data-token="styleKey:tokenName …"`. Each pair names a token for one style key; the
@@ -525,22 +703,133 @@ class Compiler {
     return { tokens };
   }
 
+  // The sections, in editor order: the root's data-section-order when given, else the order each
+  // section first appears in the document. An id tagged but never declared gets a label from its
+  // id, is hidable, and lists no fields.
   private buildSections(): SectionDef[] {
-    if (this.sectionsUsed.size === 0) return [];
-    const out: SectionDef[] = [];
-    // Canonical vocabulary first, in canonical order, for the ids the template actually used…
-    for (const def of SECTION_VOCAB) {
-      if (this.sectionsUsed.has(def.id)) {
-        out.push({ id: def.id, label: def.label, hidable: def.hidable, edits: def.edits });
+    let order = [...this.sectionsUsed];
+    const orderAttr = this.root.attrs.get("data-section-order");
+    if (orderAttr !== undefined) {
+      const listed = orderAttr.trim().split(/\s+/).filter(Boolean);
+      const unknown = listed.find((id) => !this.sectionsUsed.has(id));
+      if (unknown) failAt("fields", `data-section-order names "${unknown}", which no element is tagged with`, this.root.line);
+      if (new Set(listed).size !== listed.length) failAt("fields", "data-section-order lists a section twice", this.root.line);
+      const missing = order.find((id) => !listed.includes(id));
+      if (missing) failAt("fields", `data-section-order leaves out section "${missing}"`, this.root.line);
+      order = listed;
+    }
+    return order.map((id) => {
+      const decl = this.sectionDecls.get(id);
+      return {
+        id,
+        label: decl?.label ?? humanize(id),
+        hidable: decl?.hidable ?? true,
+        fields: decl?.fields ?? [],
+      };
+    });
+  }
+
+  // --- field checks (docs/FIELDS.md §6.5, checks 5–9) --------------------------------
+  private checkFields(sections: SectionDef[]): void {
+    const listed = new Map<string, FieldDefinition>();
+    let lineColumns: Map<string, FieldDefinition> | undefined;
+
+    for (const section of sections) {
+      const line = this.sectionDecls.get(section.id)?.line;
+      let pickerSeen = false;
+      for (const f of section.fields) {
+        if (!f.id) continue; // info
+        if (listed.has(f.id)) {
+          failAt("fields", `field "${f.id}" is listed in two sections; a field belongs to one section`, line);
+        }
+        listed.set(f.id, f);
+        if (f.id === "customer") pickerSeen = true;
+        if (f.owner === "customer" && !pickerSeen) {
+          failAt("fields", `section "${section.id}" lists "${f.id}" without the "customer" picker field before it`, line);
+        }
+        if (f.columns) lineColumns = new Map(f.columns.filter((c) => c.id).map((c) => [c.id!, c]));
       }
     }
-    // …then any id outside the vocabulary, in first-occurrence order, defaulting to hidable.
-    for (const id of this.sectionsUsed) {
-      if (!SECTION_VOCAB.some((d) => d.id === id)) {
-        out.push({ id, label: capitalize(id), hidable: true });
+
+    // Every visibleIf and relativeTo must point at a listed field (a column may also point at a
+    // column of the same line).
+    for (const section of sections) {
+      const line = this.sectionDecls.get(section.id)?.line;
+      const check = (f: FieldDefinition, siblings?: Map<string, FieldDefinition>): void => {
+        const who = f.id ? `field "${f.id}"` : "an info field";
+        if (f.visibleIf && !listed.has(f.visibleIf.path) && !siblings?.has(f.visibleIf.path)) {
+          failAt("fields", `${who}: visibleIf points at "${f.visibleIf.path}", which no section lists`, line);
+        }
+        if (f.relativeTo && !listed.has(f.relativeTo)) {
+          failAt("fields", `${who}: relativeTo "${f.relativeTo}" isn't listed in any section`, line);
+        }
+        for (const c of f.columns ?? []) check(c, lineColumns);
+      };
+      for (const f of section.fields) check(f);
+    }
+
+    for (const p of this.paths) this.checkPath(p, listed, lineColumns);
+  }
+
+  // A printed/tested path must resolve to a listed field (or a calculated value), and an image
+  // or repeat must point at the right kind of field.
+  private checkPath(
+    p: PathRecord,
+    listed: Map<string, FieldDefinition>,
+    lineColumns: Map<string, FieldDefinition> | undefined
+  ): void {
+    const segments = p.path.split(".");
+    let type: FieldType;
+    let rest: string[];
+
+    if (p.scope !== null && segments[0] === p.scope) {
+      const col = segments[1];
+      if (col === undefined) {
+        failAt("binding", `"${p.path}": name a line-item column, e.g. "${p.scope}.description"`, p.line);
+      }
+      const def = lineColumns?.get(col);
+      if (def) type = def.type;
+      else if (LINE_COMPUTED_IDS.includes(col)) type = "computed";
+      else {
+        return failAt("binding", `"${p.path}": "${col}" isn't a column of the line_items field (add it to "columns")`, p.line);
+      }
+      rest = segments.slice(2);
+    } else {
+      const id = segments[0];
+      const def = listed.get(id);
+      if (def) type = def.type;
+      else if (COMPUTED_IDS.includes(id)) type = "computed";
+      else if (fieldSpec(id)) {
+        const owner = fieldSpec(id)!.owner;
+        const hint =
+          owner === "line" || owner === "line_computed"
+            ? ` — line-item values are printed inside data-repeat="line_items as item", as item.${id}`
+            : " — add it to a section's data-fields";
+        return failAt("binding", `"${p.path}": "${id}" isn't listed in any section${hint}`, p.line);
+      } else {
+        return failAt("binding", `"${p.path}": "${id}" isn't a field id`, p.line);
+      }
+      rest = segments.slice(1);
+      if (p.use === "repeat" && (id !== REPEATABLE || rest.length > 0)) {
+        failAt("binding", `data-repeat can only iterate "${REPEATABLE}"`, p.line);
       }
     }
-    return out;
+
+    const isImage = type === "image" || type === "signature";
+    if (rest.length > 0) {
+      if (!(isImage && rest.length === 1 && (rest[0] === "url" || rest[0] === "thumbnailUrl"))) {
+        failAt("binding", `"${p.path}": a ${type} value has no "${rest.join(".")}"`, p.line);
+      }
+    }
+    if (p.use === "image" && !(isImage && rest.length === 1)) {
+      failAt("binding", `an <img> src must bind an image or signature field's url, like {{ company_logo.url }}`, p.line);
+    }
+    if (p.use === "print" && rest.length === 0) {
+      if (isImage) failAt("binding", `"${p.path}" is an image; show it with <img src="{{ ${p.path}.url }}">`, p.line);
+      if (type === "discount") failAt("binding", `"${p.path}" can't be printed; print discount_total instead`, p.line);
+      if (type === "line_items") failAt("binding", `"${p.path}" can't be printed; iterate it with data-repeat`, p.line);
+      if (type === "customer") failAt("binding", `"${p.path}" is the customer's id; print customer_name instead`, p.line);
+    }
   }
 
   // `color` is an INHERITED property, so a color token declared on an element (e.g. a <div> that
@@ -605,8 +894,9 @@ class Compiler {
   // Optional, author-declared customisation sheet (APP-005): a JSON array on the root's
   // `data-customisation` attribute, emitted in author (display) order. A control whose `type` this
   // build doesn't special-case is still emitted (type + optional title) — the app ignores unknown
-  // types and unresolved token/section bindings — so new control types ship backend-first.
-  private buildCustomisation(): CustomisationControl[] | undefined {
+  // types — so new control types ship backend-first. A color/section control must name a token /
+  // section this template actually declares.
+  private buildCustomisation(theme: Theme | undefined, sections: SectionDef[]): CustomisationControl[] | undefined {
     const raw = this.root.attrs.get("data-customisation");
     if (raw === undefined) return undefined;
 
@@ -641,10 +931,16 @@ class Compiler {
         if (typeof rec.token !== "string" || rec.token.length === 0) {
           failAt("structure", 'a "color" customisation control needs a string "token"', this.root.line);
         }
+        if (!theme || !(rec.token as string in theme.tokens)) {
+          failAt("structure", `customisation names colour token "${rec.token}", which no data-token declares`, this.root.line);
+        }
         control.token = rec.token as string;
       } else if (rec.type === "section") {
         if (typeof rec.section !== "string" || rec.section.length === 0) {
           failAt("structure", 'a "section" customisation control needs a string "section"', this.root.line);
+        }
+        if (!sections.some((s) => s.id === rec.section)) {
+          failAt("structure", `customisation names section "${rec.section}", which no element is tagged with`, this.root.line);
         }
         control.section = rec.section as string;
       }
@@ -679,24 +975,26 @@ class Compiler {
 
     // Compile the root as a box; strip its padding, which became the page margin (so it isn't
     // applied twice). The root itself is never a repeat/conditional target.
-    const rootNode = this.compileElement(this.root, false) as BoxNode | TextNode;
+    this.rejectDataAttrs(this.root, ["data-if", "data-unless", "data-repeat"], "the root element");
+    const rootNode = this.compileElement(this.root, null) as BoxNode | TextNode;
     this.tagNode(rootNode, this.root);
     stripPadding(rootNode.style);
     // Push color tokens down to the text nodes that actually draw them (APP-004).
     this.propagateColorTokens(rootNode, undefined);
 
-    // Assembled from what the tree walk collected; included only when non-empty so an untagged
-    // template's bytes (and checksum) are exactly as before. [APP-003 / APP-005]
     const theme = this.buildTheme();
     const sections = this.buildSections();
-    const customisation = this.buildCustomisation();
+    this.checkFields(sections);
+    const customisation = this.buildCustomisation(theme, sections);
 
     const compiled: CompiledTemplate = {
       schemaVersion: SCHEMA_VERSION,
       compilerVersion: COMPILER_VERSION,
       page,
+      // Present only when the template declares colour tokens (APP-003). Absent (not empty) when it
+      // doesn't.
       ...(theme ? { theme } : {}),
-      ...(sections.length ? { sections } : {}),
+      sections,
       ...(customisation ? { customisation } : {}),
       root: rootNode,
     };

@@ -45,16 +45,18 @@ const find = (node: TemplateNode, type: string): TemplateNode | null => {
 // A realistic invoice template exercising most of the compiler.
 // ------------------------------------------------------------------------------------
 const VALID_HTML = `
-<div class="page" data-page-size="A4">
-  <div class="header">
-    <img class="logo" src="{{ company.logo }}" />
+<div class="page" data-page-size="A4" data-section-order="header items payment">
+  <div class="header" data-section="header" data-section-label="Invoice details" data-hidable="false"
+       data-fields='[{"id":"company_logo"},{"id":"invoice_number","label":"Invoice no."},{"id":"invoice_date","label":"Date","default":{"kind":"today"}}]'>
+    <img class="logo" src="{{ company_logo.url }}" />
     <div class="titles">
       <h1>INVOICE</h1>
-      <p class="muted">#{{ invoice.number }} · {{ invoice.date | date }}</p>
+      <p class="muted">#{{ invoice_number }} · {{ invoice_date | date }}</p>
     </div>
   </div>
 
-  <table class="items">
+  <table class="items" data-section="items" data-section-label="Items" data-hidable="false"
+         data-fields='[{"id":"line_items","label":"Items","columns":[{"id":"description","label":"Item"},{"id":"quantity","type":"number","label":"Qty"},{"id":"line_total","label":"Amount"}]},{"id":"discount","label":"Discount"}]'>
     <thead>
       <tr>
         <th style="width: 240px">Description</th>
@@ -63,22 +65,26 @@ const VALID_HTML = `
       </tr>
     </thead>
     <tbody>
-      <tr data-repeat="items as item">
+      <tr data-repeat="line_items as item">
         <td>{{ item.description }}</td>
         <td>{{ item.quantity | number }}</td>
-        <td>{{ item.amount | currency }}</td>
+        <td>{{ item.line_total | currency }}</td>
       </tr>
     </tbody>
     <tfoot>
       <tr>
         <td colspan="2">Total</td>
-        <td><strong>{{ invoice.total | currency }}</strong></td>
+        <td><strong>{{ grand_total | currency }}</strong></td>
+      </tr>
+      <tr data-if="discount_total">
+        <td colspan="2">Discount</td>
+        <td>{{ discount_total | currency }}</td>
       </tr>
     </tfoot>
   </table>
 
-  <div class="pay" data-if="payment.upi">
-    Pay via UPI: <em>{{ payment.upi }}</em>
+  <div class="pay" data-section="payment" data-fields='[{"id":"company_upi_id"}]' data-if="company_upi_id">
+    Pay via UPI: <em>{{ company_upi_id }}</em>
   </div>
 
   <ol class="terms">
@@ -102,30 +108,47 @@ h1 { font-size: 24px; font-weight: bold; color: rgb(20, 20, 40); }
 console.log("\nvalid template compiles + structure");
 const result = compileTemplate(VALID_HTML, VALID_CSS);
 const c = result.compiled;
-ok("schemaVersion / compilerVersion stamped", c.schemaVersion === 1 && c.compilerVersion === 1);
+ok("schemaVersion / compilerVersion stamped", c.schemaVersion === 2 && c.compilerVersion === 2);
 ok("page size A4", c.page.size === "A4");
 ok("page margin from root padding (48px -> 36pt)", c.page.margin.top === 36, `got ${c.page.margin.top}`);
 ok("page fontFamily Inter, baseFontSize 11", c.page.fontFamily === "Inter" && c.page.baseFontSize === 11);
 ok("root is a box", c.root.type === "box");
 
 const img = find(c.root, "image") as any;
-ok("logo <img> -> image node with a binding source", !!img && img.source.kind === "bind" && img.source.path === "company.logo");
+ok("logo <img> -> image node with a binding source", !!img && img.source.kind === "bind" && img.source.path === "company_logo.url");
 ok("logo width 96px -> 72pt", img && img.style.width === 72, img && `got ${img.style.width}`);
 
 const table = find(c.root, "table") as any;
 ok("table node present", !!table);
-ok("table body is a repeat over items as item", table && table.body.repeat && table.body.repeat.path === "items" && table.body.repeat.as === "item");
-ok("table has header and footer rows", table && table.header.length === 1 && table.footer.length === 1);
+ok("table body is a repeat over line_items as item", table && table.body.repeat && table.body.repeat.path === "line_items" && table.body.repeat.as === "item");
+ok("table has header and footer rows", table && table.header.length === 1 && table.footer.length === 2);
 ok("first column width from th width 240px -> 180pt", table && table.columns[0].width === 180, table && `got ${table.columns[0]?.width}`);
+ok("data-if on a static <tr> -> row visibleIf", table && table.footer[1].visibleIf?.path === "discount_total" && table.footer[0].visibleIf === undefined);
 
 // binding with a currency format inside the repeat row
 const bodyRow = table.body.row;
 const amountCell = bodyRow.cells[2];
 const amountText = amountCell.children[0];
-ok("amount cell binds item.amount with currency format", amountText.spans[0].value.kind === "bind" && amountText.spans[0].value.format === "currency" && amountText.spans[0].value.path === "item.amount");
+ok("amount cell binds item.line_total with currency format", amountText.spans[0].value.kind === "bind" && amountText.spans[0].value.format === "currency" && amountText.spans[0].value.path === "item.line_total");
 
 const cond = find(c.root, "conditional") as any;
-ok("data-if -> conditional node on payment.upi", !!cond && cond.path === "payment.upi");
+ok("data-if -> conditional node on company_upi_id", !!cond && cond.path === "company_upi_id");
+
+console.log("\nsections and their fields");
+const secs = c.sections as any[];
+ok("sections in data-section-order, with labels and hidable", JSON.stringify(secs.map((s) => [s.id, s.label, s.hidable])) ===
+  JSON.stringify([["header", "Invoice details", false], ["items", "Items", false], ["payment", "Payment", true]]), JSON.stringify(secs.map((s) => [s.id, s.label, s.hidable])));
+const logoField = secs[0].fields[0];
+ok("a company field inherits owner, type and label from the company form",
+  logoField.id === "company_logo" && logoField.owner === "company" && logoField.type === "image" && logoField.label === "Logo", JSON.stringify(logoField));
+ok("an id-bound type is implied (invoice_number) and the template's label wins",
+  secs[0].fields[1].type === "invoice_number" && secs[0].fields[1].label === "Invoice no.");
+const lineField = secs[1].fields[0];
+ok("line_items columns resolve, line_total as a computed currency column",
+  lineField.columns.map((x: any) => `${x.id}:${x.owner}:${x.type}`).join(",") ===
+    "description:line:text,quantity:line:number,line_total:line_computed:computed" && lineField.columns[2].format === "currency",
+  JSON.stringify(lineField.columns));
+ok("no section carries the old `edits` key", secs.every((s) => !("edits" in s)));
 
 // heading color rgb() normalized to hex; th background normalized
 const h1 = find(c.root, "text") as any; // first text node is the h1
@@ -208,19 +231,19 @@ expectReject("rejects url() background", wrap(`<span>x</span>`), `span { backgro
 expectReject("rejects unknown font", wrap(`<span>x</span>`), `span { font-family: "Comic Sans"; }`, "css", "not a bundled font");
 expectReject("rejects unrecognized color", wrap(`<span>x</span>`), `span { color: chartreuseX; }`, "css", "unrecognized color");
 expectReject("rejects malformed binding", wrap(`<span>{{ 1nope }}</span>`), "", "binding", "invalid binding path");
-expectReject("rejects unknown binding format", wrap(`<span>{{ invoice.total | money }}</span>`), "", "binding", "unknown format");
-expectReject("rejects <ol> inside data-repeat", `<div><div data-repeat="items as item"><ol><li>x</li></ol></div></div>`, "", "structure", "ol");
+expectReject("rejects unknown binding format", wrap(`<span>{{ grand_total | money }}</span>`), "", "binding", "unknown format");
+expectReject("rejects <ol> inside data-repeat", `<div><div data-repeat="line_items as item"><ol><li>x</li></ol></div></div>`, "", "structure", "ol");
 expectReject("rejects two root elements", `<div>a</div><div>b</div>`, "", "html", "exactly one root");
 expectReject("rejects CSS syntax error", wrap(`<span>x</span>`), `span { color: `, "css", "syntax error");
 
 console.log("\nsecurity regressions (from the Phase 4 adversarial review)");
 // 1. img binding fallback smuggling an external URL
-expectReject("rejects external URL via img binding fallback", wrap(`<img src="{{ company.logo ?? 'https://evil.example/x.png' }}" />`), "", "binding", "fallback");
-expectReject("rejects data: URL via img binding fallback", wrap(`<img src="{{ company.logo ?? 'data:image/png;base64,AAAA' }}" />`), "", "binding", "fallback");
+expectReject("rejects external URL via img binding fallback", wrap(`<img src="{{ company_logo.url ?? 'https://evil.example/x.png' }}" />`), "", "binding", "fallback");
+expectReject("rejects data: URL via img binding fallback", wrap(`<img src="{{ company_logo.url ?? 'data:image/png;base64,AAAA' }}" />`), "", "binding", "fallback");
 // 2. prototype pollution via binding paths / repeat aliases
 expectReject("rejects __proto__ binding path", wrap(`<span>{{ __proto__ }}</span>`), "", "binding", "reserved");
 expectReject("rejects constructor.prototype path", wrap(`<span>{{ constructor.prototype.x }}</span>`), "", "binding", "reserved");
-expectReject("rejects __proto__ repeat alias", `<div><div data-repeat="items as __proto__">{{ x }}</div></div>`, "", "binding", "reserved");
+expectReject("rejects __proto__ repeat alias", `<div><div data-repeat="line_items as __proto__">{{ x }}</div></div>`, "", "binding", "reserved");
 // 3. unbounded colspan
 expectReject("rejects colspan 1e21 (OOM guard)", `<table><tr><td colspan="1e21">x</td></tr></table>`, "", "html", "invalid colspan");
 expectReject("rejects colspan 1000000000 (too large)", `<table><tr><td colspan="1000000000">x</td></tr></table>`, "", "html", "between 1 and 64");
@@ -229,8 +252,60 @@ expectReject("rejects pathologically deep nesting", "<div>".repeat(500) + "x" + 
 
 console.log("\nsecurity: legitimate uses still compile");
 // a normal img binding and a fallback on a TEXT binding remain fine
-const okImg = compileTemplate(wrap(`<img src="{{ company.logo }}" /><span>{{ invoice.notes ?? 'N/A' }}</span>`), "");
+const okImg = compileTemplate(
+  `<div data-section="s" data-fields='[{"id":"company_logo"},{"id":"notes","type":"multiline","label":"Notes"}]'>` +
+    `<img src="{{ company_logo.url }}" /><span>{{ notes ?? 'N/A' }}</span></div>`, "");
 ok("plain img binding + text fallback compile fine", !!okImg.checksum);
+
+// ------------------------------------------------------------------------------------
+// Fields (docs/FIELDS.md §6.5): every printed path is a listed field, and every field
+// definition is checked against the registry.
+// ------------------------------------------------------------------------------------
+console.log("\nfield rules");
+const sec = (fields: string, inner: string, extra = ""): string =>
+  `<div><div data-section="s" ${extra} data-fields='${fields}'>${inner}</div></div>`;
+const PO = `{"id":"po_number","type":"text","label":"PO"}`;
+expectReject("rejects an unregistered field id", sec(`[{"id":"po_numbr","type":"text","label":"PO"}]`, "x"), "", "fields", "unknown field id");
+expectReject("rejects printing a field no section lists", wrap(`<span>{{ po_number }}</span>`), "", "binding", "isn't listed in any section");
+expectReject("rejects printing something that isn't a field", wrap(`<span>{{ po_numbr }}</span>`), "", "binding", "isn't a field id");
+expectReject("rejects an <img> bound to the image object, not its url", sec(`[{"id":"company_logo"}]`, `<img src="{{ company_logo }}" />`), "", "binding", "<img> src must bind");
+expectReject("rejects printing an image as text", sec(`[{"id":"company_logo"}]`, `<span>{{ company_logo }}</span>`), "", "binding", "is an image");
+expectReject("rejects remember on a company field", sec(`[{"id":"company_name","remember":true}]`, "x"), "", "fields", "remember");
+expectReject("rejects customer fields without the picker before them", sec(`[{"id":"customer_name"}]`, "x"), "", "fields", "picker");
+expectReject("rejects a column condition outside the first row",
+  sec(`[{"id":"hide_gst_column","type":"boolean","label":"x"}]`, `<table><tr><td>a</td></tr><tr><td data-if="hide_gst_column">b</td></tr></table>`),
+  "", "structure", "first row");
+expectReject("rejects a type stored differently from the form's", sec(`[{"id":"company_logo","type":"text"}]`, "x"), "", "fields", "stored the same way");
+expectReject("rejects a line-item id printed outside the repeat", sec(`[{"id":"line_items","label":"I","columns":[{"id":"description"}]}]`, "{{ description }}"), "", "binding", "data-repeat");
+expectReject("rejects a field with no type to inherit", sec(`[{"id":"po_number","label":"PO"}]`, "x"), "", "fields", `"type" is required`);
+expectReject("rejects an unknown attribute (typo)", sec(`[{"id":"po_number","type":"text","lable":"PO"}]`, "x"), "", "fields", "unknown attribute");
+expectReject("rejects a repeat over anything but line_items", wrap(`<div data-repeat="items as item">x</div>`), "", "binding", "can only iterate");
+expectReject("rejects a field listed in two sections",
+  `<div><div data-section="a" data-fields='[${PO}]'>x</div><div data-section="b" data-fields='[${PO}]'>y</div></div>`, "", "fields", "two sections");
+expectReject("rejects a section declared twice",
+  `<div><div data-section="a" data-fields='[]'>x</div><div data-section="a" data-section-label="A">y</div></div>`, "", "fields", "declared twice");
+expectReject("rejects data-fields without data-section", wrap(`<div data-fields='[${PO}]'>x</div>`), "", "fields", "need data-section");
+expectReject("rejects a data-section-order that leaves a section out",
+  `<div data-section-order="a"><div data-section="a">x</div><div data-section="b">y</div></div>`, "", "fields", "leaves out");
+expectReject("rejects a customisation control naming no section",
+  `<div data-customisation='[{"type":"section","section":"nope"}]'><div data-section="a">x</div></div>`, "", "structure", "no element is tagged");
+expectReject("rejects a money input with another type", sec(`[{"id":"line_items","label":"I","columns":[{"id":"quantity","type":"text","label":"Q"}]}]`, "x"), "", "fields", `must have type "number"`);
+expectReject("rejects a setting listed as a template field", sec(`[{"id":"settings_default_notes"}]`, "x"), "", "fields", "is a setting");
+expectReject("rejects a setting default naming a non-setting", sec(`[{"id":"notes","type":"multiline","label":"N","default":{"kind":"setting","id":"po_number"}}]`, "x"), "", "fields", "settings_*");
+expectReject("rejects data-if on the data-repeat row",
+  sec(`[{"id":"line_items","label":"I","columns":[{"id":"description"}]}]`, `<table><tbody><tr data-repeat="line_items as item" data-if="line_items"><td>{{ item.description }}</td></tr></tbody></table>`),
+  "", "structure", "data-repeat row");
+expectReject("rejects data-if on an inline element", sec(`[${PO}]`, `<p>a <span data-if="po_number">b</span></p>`), "", "structure", "isn't supported");
+
+const cols = compileTemplate(
+  sec(`[{"id":"hide_gst_column","type":"boolean","label":"Hide GST","remember":true}]`,
+    `<table><thead><tr><th>A</th><th data-unless="hide_gst_column" colspan="2">GST</th></tr></thead><tbody><tr><td>a</td><td>b</td><td>c</td></tr></tbody></table>`), "").compiled;
+const colTable = find(cols.root, "table") as any;
+ok("a first-row cell condition becomes the visibleIf of every column it spans",
+  JSON.stringify(colTable.columns) ===
+    JSON.stringify([{ width: "auto" }, ...[1, 2].map(() => ({ width: "auto", visibleIf: { path: "hide_gst_column", negate: true } }))]),
+  JSON.stringify(colTable.columns));
+ok("a remembered invoice field keeps remember: true", (cols.sections[0].fields[0] as any).remember === true);
 
 console.log("\ncascade: descendant-then-child selector backtracking");
 // `.card > .row .cell` must apply to a .cell under an OUTER .row that is a direct child of .card,

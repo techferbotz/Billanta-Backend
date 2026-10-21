@@ -1,27 +1,24 @@
 import { Settings, Prisma } from "@prisma/client";
 import { prisma } from "../../../prisma/client";
-import { SettingsWriteData } from "../dto/settings.dto";
+import { serializable } from "../../../prisma/serializable";
+import { Values, mergeValues, storedValues } from "../../../fields/values";
 
 // All Settings database access. No Prisma outside this file.
 export class SettingsRepository {
-  async findByUserId(userId: string): Promise<Settings | null> {
-    return prisma.settings.findUnique({ where: { userId } });
-  }
-
   /**
-   * The user's settings, auto-creating a defaults row on first access.
+   * The user's settings, auto-creating a row with `defaults` on first access.
    *
    * The create is race-safe: if two concurrent first-GETs both see null and both try to
    * create, the loser hits the P2002 unique violation and simply re-reads the winner's row.
    * Keeping this here (rather than in the service) is what keeps @prisma/client out of the
-   * service layer. Column defaults (INR, nextInvoiceNumber 1) supply the values.
+   * service layer.
    */
-  async getOrCreate(userId: string): Promise<Settings> {
+  async getOrCreate(userId: string, defaults: Values): Promise<Settings> {
     const existing = await prisma.settings.findUnique({ where: { userId } });
     if (existing) return existing;
 
     try {
-      return await prisma.settings.create({ data: { userId } });
+      return await prisma.settings.create({ data: { userId, values: defaults as Prisma.InputJsonObject } });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         const row = await prisma.settings.findUnique({ where: { userId } });
@@ -31,19 +28,29 @@ export class SettingsRepository {
     }
   }
 
-  /**
-   * Merge the given fields into the user's settings (PUT is a merge — see settings.dto.ts).
-   *
-   * `upsert` keyed on the unique `userId` is idempotent. Only the fields present in `data`
-   * are written, so an omitted field is untouched on update; on the create branch, omitted
-   * columns take their schema defaults (INR, nextInvoiceNumber 1) — so a first-ever PUT can
-   * never produce a null counter that contradicts getOrCreate().
-   */
-  async upsertMerge(userId: string, data: SettingsWriteData): Promise<Settings> {
+  // Create or fully replace the user's settings. Keyed on the unique `userId`, so idempotent.
+  async upsert(userId: string, values: Values): Promise<Settings> {
+    const json = values as Prisma.InputJsonObject;
     return prisma.settings.upsert({
       where: { userId },
-      create: { userId, ...data },
-      update: { ...data },
+      create: { userId, values: json },
+      update: { values: json },
+    });
+  }
+
+  /**
+   * Merge a patch into the user's settings. A first-ever PATCH merges into `defaults`, so it can
+   * never produce a row missing the running invoice number. Serializable, so two concurrent
+   * patches can't drop each other's keys.
+   */
+  async patch(userId: string, patch: Values, defaults: Values): Promise<Settings> {
+    return serializable(async (tx) => {
+      const existing = await tx.settings.findUnique({ where: { userId } });
+      const base = existing ? storedValues(existing.values) : defaults;
+      const merged = mergeValues(base, patch) as Prisma.InputJsonObject;
+      return existing
+        ? tx.settings.update({ where: { userId }, data: { values: merged } })
+        : tx.settings.create({ data: { userId, values: merged } });
     });
   }
 }

@@ -1,0 +1,558 @@
+{
+  "schemaVersion": 1,
+  "optionLists": {
+    "indian_states": [
+      {
+        "value": "01",
+        "label": "Jammu and Kashmir"
+      },
+      {
+        "value": "02",
+        "label": "Himachal Pradesh"
+      },
+      {
+        "value": "03",
+        "label": "Punjab"
+      },
+      {
+        "value": "04",
+        "label": "Chandigarh"
+      },
+      {
+        "value": "05",
+        "label": "Uttarakhand"
+      },
+      {
+        "value": "06",
+        "label": "Haryana"
+      },
+      {
+        "value": "07",
+        "label": "Delhi"
+      },
+      {
+        "value": "08",
+        "label": "Rajasthan"
+      },
+      {
+        "value": "09",
+        "label": "Uttar Pradesh"
+      },
+      {
+        "value": "10",
+        "label": "Bihar"
+      },
+      {
+        "value": "11",
+        "label": "Sikkim"
+      },
+      {
+        "value": "12",
+        "label": "Arunachal Pradesh"
+      },
+      {
+        "value": "13",
+        "label": "Nagaland"
+      },
+      {
+        "value": "14",
+        "label": "Manipur"
+      },
+      {
+        "value": "15",
+        "label": "Mizoram"
+      },
+      {
+        "value": "16",
+        "label": "Tripura"
+      },
+      {
+        "value": "17",
+        "label": "Meghalaya"
+      },
+      {
+        "value": "18",
+        "label": "Assam"
+      },
+      {
+        "value": "19",
+        "label": "West Bengal"
+      },
+      {
+        "value": "20",
+        "label": "Jharkhand"
+      },
+      {
+        "value": "21",
+        "label": "Odisha"
+      },
+      {
+        "value": "22",
+        "label": "Chhattisgarh"
+      },
+      {
+        "value": "23",
+        "label": "Madhya Pradesh"
+      },
+      {
+        "value": "24",
+        "label": "Gujarat"
+      },
+      {
+        "value": "26",
+        "label": "Dadra and Nagar Haveli and Daman and Diu"
+      },
+      {
+        "value": "27",
+        "label": "Maharashtra"
+      },
+      {
+        "value": "29",
+        "label": "Karnataka"
+      },
+      {
+        "value": "30",
+        "label": "Goa"
+      },
+      {
+        "value": "31",
+        "label": "Lakshadweep"
+      },
+      {
+        "value": "32",
+        "label": "Kerala"
+      },
+      {
+        "value": "33",
+        "label": "Tamil Nadu"
+      },
+      {
+        "value": "34",
+        "label": "Puducherry"
+      },
+      {
+        "value": "35",
+        "label": "Andaman and Nicobar Islands"
+      },
+      {
+        "value": "36",
+        "label": "Telangana"
+      },
+      {
+        "value": "37",
+        "label": "Andhra Pradesh"
+      },
+      {
+        "value": "38",
+        "label": "Ladakh"
+      },
+      {
+        "value": "96",
+        "label": "Outside India"
+      },
+      {
+        "value": "97",
+        "label": "Other Territory"
+      }
+    ]
+  },
+  "forms": {
+    "company": {
+      "sections": [
+        {
+          "id": "business",
+          "label": "Business details",
+          "fields": [
+            {
+              "id": "company_name",
+              "owner": "company",
+              "type": "text",
+              "label": "Business name",
+              "maxLength": 200
+            },
+            {
+              "id": "company_logo",
+              "owner": "company",
+              "type": "image",
+              "label": "Logo"
+            },
+            {
+              "id": "company_gstin",
+              "owner": "company",
+              "type": "gstin",
+              "label": "GSTIN"
+            },
+            {
+              "id": "company_pan",
+              "owner": "company",
+              "type": "pan",
+              "label": "PAN"
+            },
+            {
+              "id": "company_phone",
+              "owner": "company",
+              "type": "phone",
+              "label": "Phone"
+            },
+            {
+              "id": "company_email",
+              "owner": "company",
+              "type": "email",
+              "label": "Email"
+            },
+            {
+              "id": "company_website",
+              "owner": "company",
+              "type": "text",
+              "label": "Website"
+            }
+          ]
+        },
+        {
+          "id": "address",
+          "label": "Address",
+          "fields": [
+            {
+              "id": "company_address_line1",
+              "owner": "company",
+              "type": "text",
+              "label": "Address line 1"
+            },
+            {
+              "id": "company_address_line2",
+              "owner": "company",
+              "type": "text",
+              "label": "Address line 2"
+            },
+            {
+              "id": "company_city",
+              "owner": "company",
+              "type": "text",
+              "label": "City"
+            },
+            {
+              "id": "company_state",
+              "owner": "company",
+              "type": "select",
+              "label": "State",
+              "options": "indian_states"
+            },
+            {
+              "id": "company_pincode",
+              "owner": "company",
+              "type": "pincode",
+              "label": "PIN code"
+            },
+            {
+              "id": "company_country",
+              "owner": "company",
+              "type": "text",
+              "label": "Country",
+              "default": {
+                "kind": "value",
+                "value": "India"
+              }
+            }
+          ]
+        },
+        {
+          "id": "bank",
+          "label": "Bank details",
+          "fields": [
+            {
+              "id": "company_bank_name",
+              "owner": "company",
+              "type": "text",
+              "label": "Bank name"
+            },
+            {
+              "id": "company_bank_account_name",
+              "owner": "company",
+              "type": "text",
+              "label": "Account name"
+            },
+            {
+              "id": "company_bank_account_number",
+              "owner": "company",
+              "type": "text",
+              "label": "Account number"
+            },
+            {
+              "id": "company_bank_ifsc",
+              "owner": "company",
+              "type": "ifsc",
+              "label": "IFSC"
+            },
+            {
+              "id": "company_bank_branch",
+              "owner": "company",
+              "type": "text",
+              "label": "Branch"
+            }
+          ]
+        },
+        {
+          "id": "upi",
+          "label": "UPI",
+          "fields": [
+            {
+              "id": "company_upi_id",
+              "owner": "company",
+              "type": "upi_id",
+              "label": "UPI ID"
+            },
+            {
+              "id": "company_upi_qr",
+              "owner": "company",
+              "type": "image",
+              "label": "UPI QR code"
+            }
+          ]
+        },
+        {
+          "id": "signature",
+          "label": "Signature",
+          "fields": [
+            {
+              "id": "company_signature",
+              "owner": "company",
+              "type": "signature",
+              "label": "Signature"
+            },
+            {
+              "id": "company_signatory_name",
+              "owner": "company",
+              "type": "text",
+              "label": "Signatory name"
+            },
+            {
+              "id": "company_signatory_designation",
+              "owner": "company",
+              "type": "text",
+              "label": "Designation"
+            }
+          ]
+        }
+      ]
+    },
+    "customer": {
+      "sections": [
+        {
+          "id": "customer",
+          "label": "Customer",
+          "fields": [
+            {
+              "id": "customer_name",
+              "owner": "customer",
+              "type": "text",
+              "label": "Customer name",
+              "maxLength": 200
+            },
+            {
+              "id": "customer_contact_person",
+              "owner": "customer",
+              "type": "text",
+              "label": "Contact person"
+            },
+            {
+              "id": "customer_phone",
+              "owner": "customer",
+              "type": "phone",
+              "label": "Phone"
+            },
+            {
+              "id": "customer_email",
+              "owner": "customer",
+              "type": "email",
+              "label": "Email"
+            },
+            {
+              "id": "customer_gstin",
+              "owner": "customer",
+              "type": "gstin",
+              "label": "GSTIN"
+            }
+          ]
+        },
+        {
+          "id": "address",
+          "label": "Address",
+          "fields": [
+            {
+              "id": "customer_address_line1",
+              "owner": "customer",
+              "type": "text",
+              "label": "Address line 1"
+            },
+            {
+              "id": "customer_address_line2",
+              "owner": "customer",
+              "type": "text",
+              "label": "Address line 2"
+            },
+            {
+              "id": "customer_city",
+              "owner": "customer",
+              "type": "text",
+              "label": "City"
+            },
+            {
+              "id": "customer_state",
+              "owner": "customer",
+              "type": "select",
+              "label": "State",
+              "help": "Also the place of supply",
+              "options": "indian_states"
+            },
+            {
+              "id": "customer_pincode",
+              "owner": "customer",
+              "type": "pincode",
+              "label": "PIN code"
+            },
+            {
+              "id": "customer_country",
+              "owner": "customer",
+              "type": "text",
+              "label": "Country",
+              "default": {
+                "kind": "value",
+                "value": "India"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "product": {
+      "sections": [
+        {
+          "id": "product",
+          "label": "Product",
+          "fields": [
+            {
+              "id": "description",
+              "owner": "line",
+              "type": "text",
+              "label": "Product name",
+              "maxLength": 500
+            },
+            {
+              "id": "image",
+              "owner": "line",
+              "type": "image",
+              "label": "Photo"
+            },
+            {
+              "id": "hsn_sac",
+              "owner": "line",
+              "type": "hsn_sac",
+              "label": "HSN/SAC"
+            },
+            {
+              "id": "unit",
+              "owner": "line",
+              "type": "text",
+              "label": "Unit",
+              "placeholder": "pcs, kg, hour"
+            },
+            {
+              "id": "unit_price",
+              "owner": "line",
+              "type": "money",
+              "label": "Rate"
+            },
+            {
+              "id": "tax_rate",
+              "owner": "line",
+              "type": "number",
+              "label": "GST %",
+              "default": {
+                "kind": "setting",
+                "id": "settings_default_tax_rate"
+              },
+              "min": 0,
+              "max": 100
+            }
+          ]
+        }
+      ]
+    },
+    "settings": {
+      "sections": [
+        {
+          "id": "invoice_numbering",
+          "label": "Invoice numbering",
+          "fields": [
+            {
+              "id": "settings_invoice_prefix",
+              "owner": "settings",
+              "type": "text",
+              "label": "Invoice number prefix",
+              "default": {
+                "kind": "value",
+                "value": "INV-"
+              }
+            },
+            {
+              "id": "settings_next_invoice_number",
+              "owner": "settings",
+              "type": "number",
+              "label": "Next invoice number",
+              "default": {
+                "kind": "value",
+                "value": "1"
+              },
+              "min": 1,
+              "decimals": 0
+            }
+          ]
+        },
+        {
+          "id": "defaults",
+          "label": "Defaults for new invoices",
+          "fields": [
+            {
+              "id": "settings_default_currency",
+              "owner": "settings",
+              "type": "currency_code",
+              "label": "Currency",
+              "default": {
+                "kind": "value",
+                "value": "INR"
+              }
+            },
+            {
+              "id": "settings_default_tax_rate",
+              "owner": "settings",
+              "type": "number",
+              "label": "GST %",
+              "min": 0,
+              "max": 100
+            },
+            {
+              "id": "settings_default_due_days",
+              "owner": "settings",
+              "type": "number",
+              "label": "Due in (days)",
+              "min": 0,
+              "decimals": 0
+            },
+            {
+              "id": "settings_default_notes",
+              "owner": "settings",
+              "type": "multiline",
+              "label": "Notes"
+            },
+            {
+              "id": "settings_default_terms",
+              "owner": "settings",
+              "type": "multiline",
+              "label": "Terms"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

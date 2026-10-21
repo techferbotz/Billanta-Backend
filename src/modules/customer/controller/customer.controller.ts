@@ -4,21 +4,21 @@ import { getUserId } from "../../../common/utils/getUserId";
 import { parsePagination } from "../../../common/pagination";
 import { optionalUuid, requireObjectBody } from "../../../common/validation";
 import { customerService } from "../service/customer.service";
-import { parseCreateCustomerBody, parsePatchCustomerBody } from "../dto/customer.dto";
+import { parseCustomerPatch, parseCustomerValues } from "../dto/customer.dto";
 
-// POST /customers — create (client may supply the uuid `id`; idempotent by that id).
+// POST /customers { id?, values } — create (client may supply the uuid `id`; idempotent by that id).
 export const createCustomer = async (req: Request, res: Response): Promise<void> => {
   const userId = getUserId(req);
   const body = requireObjectBody(req.body);
   const id = optionalUuid(body.id, "id");
-  const data = parseCreateCustomerBody(body);
-  const customer = await customerService.create(userId, id, data);
+  const values = parseCustomerValues(body);
+  const customer = await customerService.create(userId, id, values);
   // 201 for a fresh resource; the client already knows the id it sent, so this is mostly
   // cosmetic, but it keeps POST honest.
   sendSuccess(res, customer, 201);
 };
 
-// GET /customers?q=&limit=&cursor= — the user's customers, searchable by name/phone.
+// GET /customers?q=&limit=&cursor= — the user's customers, searchable by name/phone/GSTIN.
 export const listCustomers = async (req: Request, res: Response): Promise<void> => {
   const userId = getUserId(req);
   const page = parsePagination(req);
@@ -37,14 +37,14 @@ export const getCustomer = async (
   sendSuccess(res, customer);
 };
 
-// PATCH /customers/:id — partial update of the user's own customer.
+// PATCH /customers/:id { values } — merge into the user's own customer.
 export const patchCustomer = async (
   req: Request<{ id: string }>,
   res: Response
 ): Promise<void> => {
   const userId = getUserId(req);
-  const data = parsePatchCustomerBody(requireObjectBody(req.body));
-  const customer = await customerService.patch(userId, req.params.id, data);
+  const patch = parseCustomerPatch(requireObjectBody(req.body));
+  const customer = await customerService.patch(userId, req.params.id, patch);
   sendSuccess(res, customer);
 };
 

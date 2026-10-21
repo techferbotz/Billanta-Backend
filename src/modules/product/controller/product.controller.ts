@@ -4,15 +4,15 @@ import { getUserId } from "../../../common/utils/getUserId";
 import { parsePagination } from "../../../common/pagination";
 import { optionalUuid, requireObjectBody } from "../../../common/validation";
 import { productService } from "../service/product.service";
-import { parseCreateProductBody, parsePatchProductBody } from "../dto/product.dto";
+import { parseProductPatch, parseProductValues } from "../dto/product.dto";
 
-// POST /products — create (client may supply the uuid `id`; idempotent by that id).
+// POST /products { id?, values } — create (client may supply the uuid `id`; idempotent by that id).
 export const createProduct = async (req: Request, res: Response): Promise<void> => {
   const userId = getUserId(req);
   const body = requireObjectBody(req.body);
   const id = optionalUuid(body.id, "id");
-  const data = parseCreateProductBody(body);
-  sendSuccess(res, await productService.create(userId, id, data), 201);
+  const values = parseProductValues(body);
+  sendSuccess(res, await productService.create(userId, id, values), 201);
 };
 
 // GET /products?q=&limit=&cursor= — the user's products, searchable by name.
@@ -29,11 +29,11 @@ export const getProduct = async (req: Request<{ id: string }>, res: Response): P
   sendSuccess(res, await productService.getById(getUserId(req), req.params.id));
 };
 
-// PATCH /products/:id — partial update of the user's own product.
+// PATCH /products/:id { values } — merge into the user's own product.
 export const patchProduct = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   const userId = getUserId(req);
-  const data = parsePatchProductBody(requireObjectBody(req.body));
-  sendSuccess(res, await productService.patch(userId, req.params.id, data));
+  const patch = parseProductPatch(requireObjectBody(req.body));
+  sendSuccess(res, await productService.patch(userId, req.params.id, patch));
 };
 
 // DELETE /products/:id — hard delete (no tombstone; products aren't sync-tracked).

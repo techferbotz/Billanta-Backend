@@ -26,6 +26,18 @@ discount  = { type: "Flat" | "Percentage", value: string } | none
 options   = { discountBeforeTax: boolean }   # chosen per invoice
 ```
 
+Where they come from on the wire ([`FIELDS.md`](FIELDS.md) §7.7) — the only field ids the money
+rules read:
+
+| input | field id | if absent |
+| --- | --- | --- |
+| `item.quantity` | line `quantity` | `"0"` |
+| `item.unitPrice` | line `unit_price` (paise string) | `0` |
+| `item.taxRatePercent` | line `tax_rate` | `"0"` |
+| `discount` | invoice `discount` = `{ kind: "flat" \| "percent", value, beforeTax? }` (`flat` → `Flat`, `percent` → `Percentage`) | none |
+| `options.discountBeforeTax` | `discount.beforeTax` | `true` |
+| seller / buyer state (GST split, below) | `company_state` / `customer_state` | unknown → IGST |
+
 ## Algorithm
 
 ### Step 1 — line amounts (both modes)
@@ -76,14 +88,18 @@ Base for the discount is `subtotal`.
 
 ### What is stored per line vs per invoice
 
-- Per **InvoiceItem**: `lineTotal` (= quantity × unitPrice, pre-discount, pre-tax) and `taxAmount`.
-- Per **Invoice**: `subtotal`, `discountTotal`, `taxTotal`, `grandTotal`. The apportioned per-line
-  discount is an internal calculation detail and is not stored separately.
+- Per **line**: `lineTotal` (= quantity × unitPrice, pre-discount, pre-tax) and `taxAmount` — on the
+  wire, the line's `computed.line_total` and `computed.tax_amount`.
+- Per **invoice**: `subtotal`, `discountTotal`, `taxTotal`, `grandTotal` — on the wire,
+  `computed.subtotal`, `computed.discount_total`, `computed.tax_total`, `computed.grand_total`, and
+  the same ids in a template's render context. The apportioned per-line discount is an internal
+  calculation detail and is not stored separately.
 
 ## GST split (presentation only — derived, never stored)
 
 Only the total tax is stored. The CGST+SGST vs IGST split is derived at display time from the
-seller's and buyer's 2-digit state codes (taken from the invoice's company/customer snapshots):
+seller's and buyer's 2-digit state codes — the invoice's copies of `company_state` and
+`customer_state` — and sent as `computed.cgst_total` / `sgst_total` / `igst_total`:
 
 - **Same state** (intra-state): `cgst = floor(taxTotal / 2)`, `sgst = taxTotal − cgst`
   (an odd single paise goes to SGST so the two still sum to `taxTotal`), `igst = 0`.

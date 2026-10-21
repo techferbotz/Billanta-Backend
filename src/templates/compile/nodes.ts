@@ -10,11 +10,18 @@
 // unknown node `type`s and unknown style keys rather than crash. That is what lets the server
 // ship new template capabilities without a Play Store release.
 
+import { FieldDefinition, VisibleIf } from "../../fields/types";
+
+export type { VisibleIf };
+
 // Bump COMPILER_VERSION when the emitted tree changes in a way an older renderer can't handle;
 // bump SCHEMA_VERSION only for a structural break. Both are stamped into every compile so a
 // client can detect a tree it is too old to render.
-export const SCHEMA_VERSION = 1;
-export const COMPILER_VERSION = 1;
+//
+// Version 2 (docs/FIELDS.md): sections carry their field lists, bindings are flat field ids, and
+// table columns/rows can carry `visibleIf`.
+export const SCHEMA_VERSION = 2;
+export const COMPILER_VERSION = 2;
 
 // The conversion the compiler bakes in so the client never converts units. CSS px are assumed
 // at 96dpi; 1pt = 1/72in, so 1px = 0.75pt.
@@ -43,7 +50,7 @@ export interface LiteralValue {
 
 export interface BindValue {
   kind: "bind";
-  path: string; // e.g. "invoice.number", "item.amount" — resolved by the client at render
+  path: string; // a field id ("invoice_number"), an image's "company_logo.url", or "item.line_total" in a repeat
   format: BindingFormat;
   fallback: string; // shown when the path is missing/empty; "" if none
 }
@@ -110,12 +117,18 @@ export interface CellNode extends Tagged {
 export interface RowNode extends Tagged {
   type: "row";
   style: ResolvedStyle;
+  // A static row (header, footer, or a body without a repeat) drawn only when `path` is truthy —
+  // or falsy with `negate` (authored as data-if / data-unless on the <tr>).
+  visibleIf?: VisibleIf;
   cells: CellNode[];
 }
 
-// A column's width: an absolute number in points, or "auto" to size to content.
+// A column's width: an absolute number in points, or "auto" to size to content. `visibleIf`
+// hides the whole column (authored on the column's cell in the table's first row); the renderer
+// drops its cells in every row and shrinks any colSpan that covered it (docs/FIELDS.md §6.3).
 export interface TableColumn {
   width: number | "auto";
+  visibleIf?: VisibleIf;
 }
 
 // The description of a repeated section: iterate `path` (an array in the invoice data),
@@ -126,7 +139,7 @@ export interface RepeatBinding {
 }
 
 // A table. `header`/`footer` are static rows; `body` is EITHER a repeating row (the invoice
-// line-items case: one <tr data-repeat="items as item">) or a list of static rows — never
+// line-items case: one <tr data-repeat="line_items as item">) or a list of static rows — never
 // both. The renderer handles whichever key is present.
 export interface TableBody {
   repeat?: RepeatBinding;
@@ -198,19 +211,14 @@ export interface Theme {
   tokens: Record<string, ThemeToken>;
 }
 
-// A top-level block the app can build a show/hide toggle for. `hidable: false` marks blocks that
-// must always render (header, bill-to, items, totals); `true` marks the optional ones (payment,
-// notes, signature, terms). An unknown id is simply ignored by the app.
+// A block of the invoice the app can show/hide and edit (docs/FIELDS.md §6.1). The template
+// chooses the id, label and whether it can be hidden, and lists the fields its editor shows —
+// fully resolved, so the app builds the editor from this alone. Array order is the editor's order.
 export interface SectionDef {
   id: string;
   label: string;
   hidable: boolean;
-  // What data tapping the section edits (APP-007): "invoiceDetails" | "customer" | "items" |
-  // "discount" | "notes" | "bankDetails" | "signature" | "none". Optional — absent or an unrecognised
-  // value is treated as "none" (shown on the page, absent from the editor list), so a new editor kind
-  // ships backend-first. ("bankDetails"/"signature" replaced the earlier "company" — both edit fields
-  // that live on the company profile, but each opens a focused editor rather than the whole company form.)
-  edits?: string;
+  fields: FieldDefinition[];
 }
 
 // A single control in the app's customisation sheet (APP-005), emitted in display order. `type` is
@@ -229,10 +237,10 @@ export interface CompiledTemplate {
   schemaVersion: number;
   compilerVersion: number;
   page: PageSetup;
-  // Present only when the template declares colour tokens / tags named sections (APP-003). Absent
-  // (not empty) when it does not, so an untagged template's bytes are unchanged.
+  // Present only when the template declares colour tokens (APP-003).
   theme?: Theme;
-  sections?: SectionDef[];
+  // Always present (empty when nothing is tagged): the editor is built from it.
+  sections: SectionDef[];
   // Optional explicit ordering/labelling of the customisation sheet (APP-005). Absent => the app
   // synthesises today's sheet from `theme.tokens` + `sections`.
   customisation?: CustomisationControl[];

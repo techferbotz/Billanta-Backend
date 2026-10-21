@@ -1,14 +1,22 @@
 import { Product, Prisma } from "@prisma/client";
 import { prisma } from "../../../prisma/client";
+import { serializable } from "../../../prisma/serializable";
 import { PageParams, PaginatedResult, paginate } from "../../../common/pagination";
 import { ConflictError } from "../../../common/errors/AppError";
-import { ProductWriteData, ProductPatchData } from "../dto/product.dto";
+import { Values, mergeValues, storedValues, stringValue } from "../../../fields/values";
 
 // All Product database access. No Prisma outside this file.
 //
 // EVERY read and write is scoped by userId — the ownership boundary — structurally, so a caller
 // can't forget it. This mirrors CustomerRepository; see that file for the full rationale behind
 // the create-or-replace race handling reproduced here.
+
+// The row written for a values map: the map itself plus the name derived from it for search.
+const rowData = (values: Values) => ({
+  values: values as Prisma.InputJsonObject,
+  name: stringValue(values, "description"),
+});
+
 export class ProductRepository {
   // A single product, but only if it belongs to this user (findFirst on BOTH id and userId).
   async findByIdForUser(id: string, userId: string): Promise<Product | null> {
@@ -16,7 +24,7 @@ export class ProductRepository {
   }
 
   /**
-   * A page of the user's products, optionally filtered by `q` (matches name, case-insensitive).
+   * A page of the user's products, optionally filtered by `q` (matches the name, case-insensitive).
    * Ordered by name then id — id makes the order total, which cursor pagination requires.
    */
   async listForUser(userId: string, page: PageParams, q?: string): Promise<PaginatedResult<Product>> {
@@ -42,7 +50,8 @@ export class ProductRepository {
    * id primary key is disambiguated — this user's own racing create converges (re-run the scoped
    * update, return it, no 409); a foreign id is a genuine 409 and its row is never touched.
    */
-  async createOrReplaceOwn(userId: string, id: string, data: ProductWriteData): Promise<Product> {
+  async createOrReplaceOwn(userId: string, id: string, values: Values): Promise<Product> {
+    const data = rowData(values);
     const updated = await prisma.product.updateMany({ where: { id, userId }, data });
     if (updated.count === 1) {
       return (await prisma.product.findFirst({ where: { id, userId } }))!;
@@ -62,18 +71,22 @@ export class ProductRepository {
   }
 
   // Create with a SERVER-generated id (client sent none). No idempotency concern.
-  async createNew(userId: string, data: ProductWriteData): Promise<Product> {
-    return prisma.product.create({ data: { userId, ...data } });
+  async createNew(userId: string, values: Values): Promise<Product> {
+    return prisma.product.create({ data: { userId, ...rowData(values) } });
   }
 
   /**
-   * Patch the user's own product. Returns the updated row, or null if no row with that id belongs
-   * to this user (updateMany touching zero rows IS the ownership check).
+   * Merge a patch into the user's own product. Returns the updated row, or null if no row with
+   * that id belongs to this user. Serializable, so two concurrent patches can't drop each other's
+   * keys.
    */
-  async patchOwn(userId: string, id: string, data: ProductPatchData): Promise<Product | null> {
-    const updated = await prisma.product.updateMany({ where: { id, userId }, data });
-    if (updated.count === 0) return null;
-    return prisma.product.findFirst({ where: { id, userId } });
+  async patchOwn(userId: string, id: string, patch: Values): Promise<Product | null> {
+    return serializable(async (tx) => {
+      const existing = await tx.product.findFirst({ where: { id, userId } });
+      if (!existing) return null;
+      const merged = mergeValues(storedValues(existing.values), patch);
+      return tx.product.update({ where: { id }, data: rowData(merged) });
+    });
   }
 
   // Hard-delete the user's own product. Returns whether a row was removed, so a foreign or missing

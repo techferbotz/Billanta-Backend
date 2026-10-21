@@ -75,60 +75,81 @@ const main = async (): Promise<void> => {
   const tokenB = generateAccessToken(B.id);
 
   try {
+    console.log("\nforms — public, cacheable");
+    const forms = await api(null, "GET", "/forms");
+    check("GET /forms works signed out and lists the four forms",
+      forms.status === 200 && ["company", "customer", "product", "settings"].every((f) => f in data(forms).forms));
+    const formsRes = await fetch(`${BASE}/forms`);
+    const etag = formsRes.headers.get("etag");
+    const revalidated = await fetch(`${BASE}/forms`, { headers: { "If-None-Match": etag ?? "" } });
+    check("GET /forms revalidates to a 304 with its ETag", !!etag && revalidated.status === 304);
+
     console.log("\ncompany — singleton per user, isolated");
     check("A GET /company is null before setup", data(await api(tokenA, "GET", "/company")) === null);
     const putA = await api(tokenA, "PUT", "/company", {
-      name: "Acme Traders",
-      gstin: "27AAPFU0939F1ZV",
-      addressLine1: "1 MG Road",
-      city: "Pune",
+      values: { company_name: "Acme Traders", company_gstin: "27AAPFU0939F1ZV", company_address_line1: "1 MG Road", company_city: "Pune" },
     });
-    check("A PUT /company succeeds", putA.status === 200 && data(putA).name === "Acme Traders");
-    check("A PUT /company derives stateCode 27 from GSTIN", data(putA).stateCode === "27");
+    check("A PUT /company succeeds", putA.status === 200 && data(putA).values.company_name === "Acme Traders");
     check("B GET /company is still null (isolation)", data(await api(tokenB, "GET", "/company")) === null);
     // full-replace: omitting city clears it
-    const putA2 = await api(tokenA, "PUT", "/company", { name: "Acme Traders" });
-    check("A PUT /company full-replace nulls omitted city", data(putA2).city === null);
+    const putA2 = await api(tokenA, "PUT", "/company", { values: { company_name: "Acme Traders" } });
+    check("A PUT /company full-replace drops the omitted city", !("company_city" in data(putA2).values));
+    const patchA = await api(tokenA, "PATCH", "/company", { values: { company_city: "Mumbai" } });
+    check("A PATCH /company merges (city set, name kept)",
+      data(patchA).values.company_city === "Mumbai" && data(patchA).values.company_name === "Acme Traders");
+    const patchB = await api(tokenB, "PATCH", "/company", { values: { company_bank_ifsc: "HDFC0001234" } });
+    check("B PATCH /company creates B's own profile (an invoice can write back first)",
+      patchB.status === 200 && JSON.stringify(data(patchB).values) === JSON.stringify({ company_bank_ifsc: "HDFC0001234" }));
+    check("A PUT /company with a customer field -> 400",
+      (await api(tokenA, "PUT", "/company", { values: { customer_name: "x" } })).status === 400);
 
-    console.log("\nsettings — auto-created, isolated");
+    console.log("\nsettings — auto-created with the form's defaults, isolated");
     const sgA = await api(tokenA, "GET", "/settings");
-    check("A GET /settings auto-creates with INR default", data(sgA).defaultCurrency === "INR");
-    check("A settings nextInvoiceNumber defaults to 1", data(sgA).nextInvoiceNumber === 1);
-    const sPut = await api(tokenA, "PUT", "/settings", { defaultCurrency: "USD", defaultTaxPercent: 18, nextInvoiceNumber: 5 });
-    check("A PUT /settings stores decimal tax as exact string", data(sPut).defaultTaxPercent === "18");
-    check("A PUT /settings currency updated", data(sPut).defaultCurrency === "USD");
+    check("A GET /settings auto-creates with INR, INV- and counter 1",
+      data(sgA).values.settings_default_currency === "INR" && data(sgA).values.settings_invoice_prefix === "INV-" &&
+        data(sgA).values.settings_next_invoice_number === "1");
+    const sPatch = await api(tokenA, "PATCH", "/settings", { values: { settings_default_currency: "USD", settings_default_tax_rate: "18", settings_next_invoice_number: "5" } });
+    check("A PATCH /settings merges and keeps the prefix", data(sPatch).values.settings_default_tax_rate === "18" &&
+      data(sPatch).values.settings_default_currency === "USD" && data(sPatch).values.settings_invoice_prefix === "INV-");
     const sgB = await api(tokenB, "GET", "/settings");
-    check("B settings independent of A (still INR)", data(sgB).defaultCurrency === "INR");
+    check("B settings independent of A (still INR)", data(sgB).values.settings_default_currency === "INR");
 
     console.log("\ncustomer — client uuid, idempotency, isolation, 404-not-403");
     const cid = "11111111-1111-4111-8111-111111111111";
-    const c1 = await api(tokenA, "POST", "/customers", { id: cid, name: "Bob Buyer", phone: "9876543210" });
+    const bob = (name: string) => ({ id: cid, values: { customer_name: name, customer_phone: "9876543210" } });
+    const c1 = await api(tokenA, "POST", "/customers", bob("Bob Buyer"));
     check("A POST /customers with client uuid -> 201", c1.status === 201 && data(c1).id === cid);
     // idempotent replace
-    const c2 = await api(tokenA, "POST", "/customers", { id: cid, name: "Bob Buyer Renamed", phone: "9876543210" });
-    check("A re-POST same id updates, not duplicates", c2.status === 201 && data(c2).name === "Bob Buyer Renamed");
+    const c2 = await api(tokenA, "POST", "/customers", bob("Bob Buyer Renamed"));
+    check("A re-POST same id updates, not duplicates", c2.status === 201 && data(c2).values.customer_name === "Bob Buyer Renamed");
     const listA = await api(tokenA, "GET", "/customers");
     check("A list has exactly 1 customer (no duplicate)", data(listA).items.length === 1);
 
     // isolation: B cannot see/touch A's customer
     check("B GET A's customer -> 404", (await api(tokenB, "GET", `/customers/${cid}`)).status === 404);
-    check("B PATCH A's customer -> 404", (await api(tokenB, "PATCH", `/customers/${cid}`, { name: "hax" })).status === 404);
+    check("B PATCH A's customer -> 404", (await api(tokenB, "PATCH", `/customers/${cid}`, { values: { customer_name: "hax" } })).status === 404);
     check("B DELETE A's customer -> 404", (await api(tokenB, "DELETE", `/customers/${cid}`)).status === 404);
-    const collide = await api(tokenB, "POST", "/customers", { id: cid, name: "B tries A's id" });
+    const collide = await api(tokenB, "POST", "/customers", { id: cid, values: { customer_name: "B tries A's id" } });
     check("B POST with A's id -> 409 (no overwrite)", collide.status === 409);
     // prove A's row is untouched by B's attempts
     const stillA = await api(tokenA, "GET", `/customers/${cid}`);
-    check("A's customer name unchanged after B's attempts", data(stillA).name === "Bob Buyer Renamed");
+    check("A's customer name unchanged after B's attempts", data(stillA).values.customer_name === "Bob Buyer Renamed");
     check("B list is empty (never saw A's customer)", data(await api(tokenB, "GET", "/customers")).items.length === 0);
 
     console.log("\ncustomer — search + PATCH merge");
-    await api(tokenA, "POST", "/customers", { name: "Charlie Corp", phone: "5550001111" });
+    await api(tokenA, "POST", "/customers", { values: { customer_name: "Charlie Corp", customer_phone: "5550001111", customer_gstin: "29PQRSX5678K1Z3" } });
     const search = await api(tokenA, "GET", "/customers?q=charlie");
-    check("A search q=charlie finds Charlie", data(search).items.length === 1 && data(search).items[0].name === "Charlie Corp");
+    check("A search q=charlie finds Charlie", data(search).items.length === 1 && data(search).items[0].values.customer_name === "Charlie Corp");
     const searchPhone = await api(tokenA, "GET", "/customers?q=98765");
     check("A search by phone fragment finds Bob", data(searchPhone).items.some((c: any) => c.id === cid));
-    const patch = await api(tokenA, "PATCH", `/customers/${cid}`, { email: "bob@x.com" });
-    check("A PATCH merges (email set, name preserved)", data(patch).email === "bob@x.com" && data(patch).name === "Bob Buyer Renamed");
+    const searchGstin = await api(tokenA, "GET", "/customers?q=pqrsx");
+    check("A search by GSTIN fragment finds Charlie", data(searchGstin).items.length === 1);
+    const patch = await api(tokenA, "PATCH", `/customers/${cid}`, { values: { customer_email: "bob@x.com" } });
+    check("A PATCH merges (email set, name preserved)",
+      data(patch).values.customer_email === "bob@x.com" && data(patch).values.customer_name === "Bob Buyer Renamed");
+    const renamed = await api(tokenA, "PATCH", `/customers/${cid}`, { values: { customer_name: "Zed Buyer" } });
+    check("a PATCHed name is what search sees", renamed.status === 200 &&
+      data(await api(tokenA, "GET", "/customers?q=zed")).items.some((c: any) => c.id === cid));
 
     console.log("\naccount deletion cascades");
     const delA = await api(tokenA, "DELETE", "/users/me");

@@ -24,8 +24,9 @@ here is an *authoring language*, not a runtime. A template you generate MUST:
 1. **Compile cleanly** through the real compiler (anything outside the subset is rejected).
 2. Be **fully themed** — every element drawn in a theme colour is tokenised, so a user's colour
    override never leaves a stray element behind (this is a hard, verified gate).
-3. Expose the **sections** (with `edits`), **empty-state placeholders**, and optional
-   **customisation** the app's section editor is built on.
+3. Declare the **sections and their fields** (`data-fields`) the app's editor is built from — the
+   template, not the app, defines what each section edits (docs/FIELDS.md) — plus
+   **empty-state placeholders** and optional **customisation**.
 
 **Never publish a template that has not passed `verifyTemplate.ts` (Step 4).**
 
@@ -65,27 +66,32 @@ subset**, not pixel-copying: anything unsupported (gradients, background images,
 typefaces, absolute positioning, watermarks) is simplified to the nearest supported equivalent or
 dropped.
 
-**2. Sections — map every block to a Billanta section id.** The id decides the editor it opens and
-**whether it can be hidden** (you don't choose hidability freely — it follows the id):
+**2. Sections — map every block to a section, and list the fields it edits.** The template chooses
+each section's id, label and whether it can be hidden, and lists the fields its editor shows. Keep the
+usual ids so the editor reads the same across templates:
 
-  | reference block (any wording) | `data-section` | edits | hidable |
+  | reference block (any wording) | `data-section` | fields it typically lists | `data-hidable` |
   | --- | --- | --- | --- |
-  | seller — "From" / "Billed From" / logo + company at top, with the invoice no./date/due | `header` | invoiceDetails | no |
-  | buyer — "Bill To" / "Billed To" / "Ship To" / customer | `parties` | customer | no |
-  | the line-item table | `items` | items | no |
-  | subtotal / tax / grand total | `totals` | discount | no |
-  | "Payment" / UPI / "Pay to" / **bank account** (A/C no., IFSC) | `payment` | company | **yes** |
-  | "Notes" / remarks | `notes` | notes | **yes** |
-  | signature / "Authorised signatory" | `signature` | company | **yes** |
-  | "Terms" / "Terms & Conditions" | `terms` | none | **yes** |
+  | seller — "From" / logo + company at top | `business` | `company_logo`, `company_name`, address, `company_gstin`, phone… | `false` |
+  | invoice no. / date / due / PO | `header` | `invoice_number`, `invoice_date`, `due_date`, `po_number` | `false` |
+  | buyer — "Bill To" / "Billed To" / customer | `parties` | `customer` (the picker, **first**), `customer_name`, address, `customer_gstin`, `customer_state` | `false` |
+  | the line-item table | `items` | `line_items` with its `columns`, plus switches like `hide_gst_column` | `false` |
+  | subtotal / tax / grand total | `totals` | `discount`, and `grand_total` as a read-only computed field | `false` |
+  | "Payment" / UPI / **bank account** (A/C no., IFSC) | `payment` | `company_upi_id`, `company_upi_qr`, `company_bank_*` | (default `true`) |
+  | "Notes" / remarks | `notes` | `notes` | (default `true`) |
+  | signature / "Authorised signatory" | `signature` | `company_signature`, `company_signatory_name`, `company_signatory_designation` | (default `true`) |
+  | "Terms" / "Terms & Conditions" | `terms` | `terms` | (default `true`) |
 
-  - Tag each top-level block `data-section="<id>"`. Structural blocks (header, parties, items, totals)
-    are never hidable; the optional ones (payment, notes, signature, terms) are.
+  - A section is declared ONCE, on one tagged element: `data-section="<id>"`
+    `data-section-label="<editor title>"` `data-hidable="false"` (omit → hidable)
+    `data-fields='[ … ]'`. Other elements may repeat `data-section="<id>"` to belong to it.
+  - Put `data-section-order="header business parties items totals …"` on the root to set the editor
+    order (otherwise it's document order — usually not the order a user fills an invoice in).
   - **Bank details live inside `payment`** — don't invent a new section for them.
-  - If the totals sit in the item-table footer, tag the grand-total `<tr>` `data-section="totals"`.
+  - If the totals sit in the item-table footer, declare `totals` on the grand-total `<tr>`.
   - The **invoice-number structure** (e.g. "INV-2025-014") is DATA, not markup — bind it as
-    `{{ invoice.number }}`; the prefix/sequence is the user's `Settings`, never hard-coded in the
-    template. Same for date/due (`{{ invoice.date | date }}`, `{{ invoice.dueDate | date }}`).
+    `{{ invoice_number }}`; the prefix/sequence come from the user's settings, never the template.
+    Same for date/due (`{{ invoice_date | date }}`, `{{ due_date | date }}`).
 
 **3. Dynamic colours — decide what to tokenise.** Pick the reference's **brand** colour(s) — the header
 fill, the title, the table-header fill, the rule above the totals, section headings — and make those a
@@ -94,14 +100,15 @@ Sample an approximate hex from the image. **Do NOT tokenise body ink or greys** 
 fixed colour so a user's override can never make the invoice unreadable. In the plan, list each colour
 you'll tokenise and which element carries it.
 
-**4. Optional fields → conditionals.** Anything that can be absent — GSTIN, due date, a discount line,
-notes, the bank block, the whole payment block — gate with `data-if`, and pair each with a
-`data-unless` editor-only empty state (Step 3b). This is how "which fields/sections are optional"
-becomes real behaviour rather than a guess.
+**4. Optional fields → conditionals.** Anything that can be absent — GSTIN, due date, a discount line
+(`data-if="discount_total"`), notes, the bank block — gate with `data-if`, and pair the editable ones
+with a `data-unless` editor-only empty state (Step 3b). A column that can be switched off (GST, HSN)
+takes `data-if`/`data-unless` on its cell in the table's FIRST row, which hides the whole column; a
+static table row (a CGST/SGST line in a `<tfoot>`) can take one too.
 
-**5. Data → bindings.** Replace EVERY literal value in the reference (company name, address, the item
-rows, the amounts, the invoice number) with a binding from the namespace in Step 2. A reconstructed
-template must contain **none** of the sample invoice's real data — only bindings.
+**5. Data → field ids.** Replace EVERY literal value in the reference (company name, address, the item
+rows, the amounts, the invoice number) with a field id from Step 2. A reconstructed template must
+contain **none** of the sample invoice's real data — only bindings.
 
 ## Step 1 — Design a real invoice (production quality)
 
@@ -109,8 +116,8 @@ If you analysed a reference (Step 0b), **reproduce its plan** — its layout, se
 tokenised colours; otherwise **design fresh** from the brief. Either way it's a real invoice, not a
 demo — compose, top to bottom:
 
-- **Header** — company logo (`<img src="{{ company.logo }}">`), name, GSTIN, and the invoice
-  number / date / due date.
+- **Header** — company logo (`<img src="{{ company_logo.url }}" data-if="company_logo">`), name,
+  GSTIN, and the invoice number / date / due date.
 - **Bill to** — the customer block.
 - **Line-item table** — description, qty, rate, amount, as a single `data-repeat` row.
 - **Totals** — subtotal, tax, and a bold grand total.
@@ -147,20 +154,55 @@ are fine — 1pt of overrun is invisible.)
 **Fonts:** only **Inter, Roboto, Open Sans, Lato, Montserrat** (or `sans-serif`→Inter).
 **Colours:** hex / `rgb()` / named — all normalised to hex.
 
-**Bindings** — `{{ path }}`, `{{ path | currency|date|number }}`, `{{ path ?? 'fallback' }}`:
+**Bindings** — `{{ id }}`, `{{ id | currency|date|number }}`, `{{ id ?? 'fallback' }}`. Every id is
+a **field id** from `src/fields/registry.ts` (the full list, with owners, is docs/FIELDS.md §3.3):
 ```
-company.*   name gstin addressLine1/2 city state stateCode pincode country phone email logo signature upiId qr bankName accountNumber ifsc
-customer.*  name gstin phone email addressLine1/2 city state stateCode pincode
-invoice.*   number date dueDate currency subtotal tax discount total notes status
-items[]     description hsnSac quantity unitPrice taxRate amount
-payment.*   upi qr bankName accountNumber ifsc
-signature.* url name designation
+company_*   name logo gstin pan address_line1/2 city state pincode country phone email website
+            bank_name bank_account_name bank_account_number bank_ifsc bank_branch upi_id upi_qr
+            signature signatory_name signatory_designation
+customer    (the picker)   customer_*  name contact_person phone email gstin address_line1/2 city state pincode country
+invoice     invoice_number invoice_date due_date currency po_number discount notes terms hide_gst_column
+line_items  item.description item.image item.hsn_sac item.unit item.quantity item.unit_price item.tax_rate
+            item.line_total item.tax_amount   (inside data-repeat="line_items as item")
+computed    subtotal discount_total tax_total cgst_total sgst_total igst_total grand_total
 ```
-**Repeat/conditional:** `data-repeat="items as item"` on the `<tbody>`'s `<tr>` (one repeat row per
-table, no static rows alongside it); `data-if="payment.upi"` renders an element only when the path is
-truthy; `data-unless="items"` only when it is FALSY (the two pair up for empty states — Step 3b, and an
-element may not carry both); `data-editor-only` marks an element the app shows ONLY while editing and
-drops from every export.
+- Images print through their url: `<img src="{{ company_logo.url }}">`; test them bare
+  (`data-if="company_logo"`).
+- A select (`company_state`, `customer_state`) prints its label ("Karnataka"), not the code.
+- **Every id you print or test must be listed in some section's `data-fields`** (computed ids may be
+  printed without listing). Printing an unlisted field fails the compile — that's what guarantees the
+  user can edit everything on the page. A field belongs to ONE section but may be printed anywhere.
+- **Need a field that isn't in the registry?** Add it to `src/fields/registry.ts` first (a backend
+  deploy), then use it — never invent an id in a template.
+
+**`data-fields`** — a JSON array on the section's element (inside a single-quoted attribute):
+```html
+data-fields='[
+  {"id":"invoice_number","label":"Invoice no."},
+  {"id":"invoice_date","label":"Date","default":{"kind":"today"}},
+  {"id":"due_date","type":"due_date","label":"Due date","remember":true,"presets":[0,7,15,30],
+   "default":{"kind":"setting","id":"settings_default_due_days"}},
+  {"id":"po_number","type":"text","label":"PO number","remember":true}
+]'
+```
+- Company / customer / product ids **inherit** type and label from the global forms — just
+  `{"id":"company_gstin"}`. Invoice ids (`po_number`, `notes`, `terms`, `hide_gst_column`, …) need a
+  `type` and `label`. Money inputs and id-bound types are fixed (`quantity` number, `unit_price` money,
+  `tax_rate` number, `discount`, `line_items`, `customer`, `invoice_number`).
+- `line_items` lists its editor's `columns`:
+  `{"id":"line_items","label":"Items","columns":[{"id":"description","label":"Item"},{"id":"quantity","type":"number","label":"Qty","default":{"kind":"value","value":"1"}},{"id":"unit_price","label":"Rate"},{"id":"tax_rate","label":"GST %","default":{"kind":"setting","id":"settings_default_tax_rate"}},{"id":"line_total","label":"Amount"}]}`
+- `remember: true` (invoice and line fields only) keeps the last value on the device to prefill the
+  next invoice — use it for things that repeat (due period, PO number, notes, a column switch).
+- **Never set `required`** (it doesn't exist): drafts may be incomplete.
+- Types: text multiline number money boolean date select image signature phone email gstin pan ifsc
+  upi_id pincode hsn_sac invoice_number due_date currency_code customer line_items discount computed
+  info. The checks are docs/FIELDS.md §6.5 — the compiler's message names the rule.
+
+**Repeat/conditional:** `data-repeat="line_items as item"` on the `<tbody>`'s `<tr>` (one repeat row
+per table, no static rows alongside it); `data-if="company_upi_id"` renders an element only when the
+value is truthy; `data-unless="line_items"` only when it is FALSY (empty, `false`, or a zero amount);
+the two pair up for empty states — Step 3b, and an element may not carry both. `data-editor-only`
+marks an element the app shows ONLY while editing and drops from every export.
 
 ## Step 3 — Theme it fully (this is what makes it production quality)
 
@@ -179,12 +221,10 @@ brief's accent — and apply it to **every** element drawn in that colour, or ve
     `data-token="borderTopColor:accent"`, etc.). Missing one = a straggler that verify will catch.
   - Rule of thumb: **if two elements share the accent colour and you tag one but not the other, that
     is a bug.** Either tag both or make one a non-token colour.
-- **Named sections** — tag each top-level block `data-section="<id>"`. Vocabulary (also fixes the
-  editor label + what it edits): `header`(invoice details) · `parties`(customer) · `items` ·
-  `totals`(discount) · `payment`(company) · `notes` · `signature`(company) · `terms`. Use the subset a
-  template actually has. If the totals live in a table `<tfoot>`, tag the grand-total `<tr>`
-  `data-section="totals"` so the discount is reachable from the editor. `edits` is emitted
-  automatically from the vocab — you don't author it.
+- **Sections** — every block the user edits is a section declared with its fields (Step 2). Leave
+  nothing printed outside a section's reach: if the company block sits in the header, list the
+  company fields in a `business` section (or in `header`). If the totals live in a table `<tfoot>`,
+  declare `totals` on the grand-total `<tr>` so the discount is reachable from the editor.
 - **Customisation sheet** (optional) — put `data-customisation='[…]'` (valid JSON) on the root to
   state the edit-sheet order/labels explicitly, e.g.
   `[{"type":"template","title":"Template"},{"type":"color","title":"Brand colour","token":"accent"},{"type":"section","title":"Payment","section":"payment"}]`.
@@ -200,9 +240,9 @@ Pattern: inside a section wrapper, pair the real content (`data-if`) with a dash
 placeholder (`data-unless`) on the same binding:
 
 ```html
-<div class="itemsblock" data-section="items">
-  <table class="items" data-if="items"> … the real items table … </table>
-  <div class="empty" data-unless="items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+<div class="itemsblock" data-section="items" data-section-label="Items" data-hidable="false" data-fields='[…]'>
+  <table class="items" data-if="line_items"> … the real items table … </table>
+  <div class="empty" data-unless="line_items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
 </div>
 ```
 ```css
@@ -219,7 +259,7 @@ Rules that matter:
   is on you.
 - Give the dashed border a **non-token** colour (a neutral grey). If you dash it in the accent colour,
   tokenise every border side or verify flags a straggler.
-- Key emptiness on a real binding: `items`, `customer.name`, `invoice.notes`, `payment.upi`, …
+- Key emptiness on a listed field: `line_items`, `customer_name`, `notes`, `company_upi_id`, …
 - Add one for each **editable** section you want styled (`parties`, `items`, `notes`, `payment`, …).
   Any section you skip still works (the app synthesises a fallback). `classic` in the seed file is the
   worked example (its items section).
@@ -232,7 +272,9 @@ Write the HTML and CSS to two files (use the scratchpad dir), then:
 npx ts-node src/scripts/verifyTemplate.ts <html-file> <css-file>
 ```
 
-It prints the theme/sections(+edits)/customisation it found, then **PASS** or **FAIL**. On FAIL:
+It prints the theme, each section with the fields it edits (`*` = remembered), and the customisation
+it found, then **PASS** or **FAIL**. Read the section list as the user's editor: every block they'd
+want to change should appear, with sensible labels, in fill order. On FAIL:
 - `COMPILE FAILED: …` — the exact phase, token, and source line. Fix that and re-run.
 - `N colour straggler(s)` — an element drawn in a token's colour isn't tokenised (Step 3). Tag it,
   make its colour inherit-propagate, or give it a non-token colour. Re-run until 0.
@@ -289,7 +331,8 @@ public even though the tree isn't). Report the slug, version, free/premium and t
 ## Guardrails
 
 - Never skip Step 4; never publish a FAIL.
-- Never invent bindings outside the namespace, or CSS/tags outside the subset — they'll be rejected.
+- Never invent field ids outside the registry, or CSS/tags outside the subset — they'll be rejected.
+  A new id is a backend change to `src/fields/registry.ts` first.
 - The admin key is a secret: fetch it into an env var, never echo it or write it to a file.
 - Publishing makes the template **immediately visible** to app users. If the brief is experimental,
   offer to publish it as `--premium` (gated) or to stop at Step 5 for review.

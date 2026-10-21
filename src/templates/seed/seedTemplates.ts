@@ -2,10 +2,9 @@
 // simultaneously (a) the starter templates the seed script publishes, and (b) the worked
 // examples in docs/TEMPLATE_AUTHORING.md. Every one must compile; see checkSeedTemplates.ts.
 //
-// Binding namespace available to templates:
-//   company.*  customer.*  invoice.* (number,date,dueDate,currency,subtotal,tax,discount,total,notes,status)
-//   items[] (description,hsnSac,quantity,unitPrice,taxRate,amount)  payment.* (upi,qr,bankName,accountNumber,ifsc)
-//   signature.url
+// Each section declares the fields its editor shows (data-fields), and everything printed is a
+// field id from src/fields/registry.ts — see docs/FIELDS.md. Company and customer fields leave out
+// their type and label, which they inherit from the global forms.
 
 export interface SeedTemplate {
   id: string;
@@ -17,6 +16,16 @@ export interface SeedTemplate {
   css: string;
 }
 
+// The fields every seed's line-item table edits. description/unit_price/tax_rate inherit their
+// type from the product form; quantity isn't on it, so it says its own.
+const LINE_COLUMNS = `[
+  {"id":"description","label":"Item"},
+  {"id":"quantity","type":"number","label":"Qty","min":0,"default":{"kind":"value","value":"1"}},
+  {"id":"unit_price","label":"Rate"},
+  {"id":"tax_rate","label":"GST %","default":{"kind":"setting","id":"settings_default_tax_rate"}},
+  {"id":"line_total","label":"Amount"}
+]`;
+
 // ---- Classic: a clean, conventional business invoice (free) -------------------------
 const CLASSIC: SeedTemplate = {
   id: "classic",
@@ -25,34 +34,40 @@ const CLASSIC: SeedTemplate = {
   category: "Business",
   isPremium: false,
   html: `
-<div class="page" data-page-size="A4" data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Accent colour","token":"accent"},{"type":"section","title":"Payment details","section":"payment"},{"type":"section","title":"Notes","section":"notes"}]'>
-  <div class="top" data-section="header">
-    <div class="brand">
-      <img class="logo" src="{{ company.logo }}" />
+<div class="page" data-page-size="A4"
+     data-section-order="header business parties items totals payment notes"
+     data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Accent colour","token":"accent"},{"type":"section","title":"Payment details","section":"payment"},{"type":"section","title":"Notes","section":"notes"}]'>
+  <div class="top">
+    <div class="brand" data-section="business" data-section-label="Your business" data-hidable="false"
+         data-fields='[{"id":"company_logo"},{"id":"company_name"},{"id":"company_address_line1"},{"id":"company_city"},{"id":"company_pincode"},{"id":"company_gstin"}]'>
+      <img class="logo" src="{{ company_logo.url }}" data-if="company_logo" />
       <div>
-        <div class="cname">{{ company.name }}</div>
-        <div class="muted">{{ company.addressLine1 }}</div>
-        <div class="muted">{{ company.city }} {{ company.pincode }}</div>
-        <div class="muted" data-if="company.gstin">GSTIN: {{ company.gstin }}</div>
+        <div class="cname">{{ company_name }}</div>
+        <div class="muted">{{ company_address_line1 }}</div>
+        <div class="muted">{{ company_city }} {{ company_pincode }}</div>
+        <div class="muted" data-if="company_gstin">GSTIN: {{ company_gstin }}</div>
       </div>
     </div>
-    <div class="meta">
+    <div class="meta" data-section="header" data-section-label="Invoice details" data-hidable="false"
+         data-fields='[{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Date","default":{"kind":"today"}},{"id":"due_date","type":"due_date","label":"Due date","remember":true,"presets":[0,7,15,30],"default":{"kind":"setting","id":"settings_default_due_days"}}]'>
       <div class="title" data-token="color:accent">INVOICE</div>
-      <div class="muted">No. {{ invoice.number }}</div>
-      <div class="muted">Date: {{ invoice.date | date }}</div>
-      <div class="muted" data-if="invoice.dueDate">Due: {{ invoice.dueDate | date }}</div>
+      <div class="muted">No. {{ invoice_number }}</div>
+      <div class="muted">Date: {{ invoice_date | date }}</div>
+      <div class="muted" data-if="due_date">Due: {{ due_date | date }}</div>
     </div>
   </div>
 
-  <div class="billto" data-section="parties">
+  <div class="billto" data-section="parties" data-section-label="Bill to" data-hidable="false"
+       data-fields='[{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_address_line1"},{"id":"customer_gstin"},{"id":"customer_state"}]'>
     <div class="label">Bill To</div>
-    <div class="cname">{{ customer.name }}</div>
-    <div class="muted">{{ customer.addressLine1 }}</div>
-    <div class="muted" data-if="customer.gstin">GSTIN: {{ customer.gstin }}</div>
+    <div class="cname">{{ customer_name }}</div>
+    <div class="muted">{{ customer_address_line1 }}</div>
+    <div class="muted" data-if="customer_gstin">GSTIN: {{ customer_gstin }}</div>
   </div>
 
-  <div class="itemsblock" data-section="items">
-  <table class="items" data-if="items">
+  <div class="itemsblock" data-section="items" data-section-label="Items" data-hidable="false"
+       data-fields='[{"id":"line_items","label":"Items","columns":${LINE_COLUMNS}}]'>
+  <table class="items" data-if="line_items">
     <thead>
       <tr>
         <th class="desc" data-token="backgroundColor:accent">Description</th>
@@ -62,29 +77,33 @@ const CLASSIC: SeedTemplate = {
       </tr>
     </thead>
     <tbody>
-      <tr data-repeat="items as item">
+      <tr data-repeat="line_items as item">
         <td>{{ item.description }}</td>
         <td class="num">{{ item.quantity | number }}</td>
-        <td class="num">{{ item.unitPrice | currency }}</td>
-        <td class="num">{{ item.amount | currency }}</td>
+        <td class="num">{{ item.unit_price | currency }}</td>
+        <td class="num">{{ item.line_total | currency }}</td>
       </tr>
     </tbody>
     <tfoot>
-      <tr><td colspan="3" class="num">Subtotal</td><td class="num">{{ invoice.subtotal | currency }}</td></tr>
-      <tr><td colspan="3" class="num">Tax</td><td class="num">{{ invoice.tax | currency }}</td></tr>
-      <tr class="grand" data-section="totals"><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ invoice.total | currency }}</strong></td></tr>
+      <tr><td colspan="3" class="num">Subtotal</td><td class="num">{{ subtotal | currency }}</td></tr>
+      <tr data-if="discount_total"><td colspan="3" class="num">Discount</td><td class="num">-{{ discount_total | currency }}</td></tr>
+      <tr><td colspan="3" class="num">Tax</td><td class="num">{{ tax_total | currency }}</td></tr>
+      <tr class="grand" data-section="totals" data-section-label="Total" data-hidable="false"
+          data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total"}]'><td colspan="3" class="num" data-token="borderTopColor:accent">Total</td><td class="num" data-token="borderTopColor:accent"><strong>{{ grand_total | currency }}</strong></td></tr>
     </tfoot>
   </table>
-  <div class="empty" data-unless="items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+  <div class="empty" data-unless="line_items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
   </div>
 
-  <div class="pay" data-section="payment" data-if="payment.upi">
+  <div class="pay" data-section="payment" data-section-label="Payment details"
+       data-fields='[{"id":"company_upi_id"},{"id":"company_bank_name"},{"id":"company_bank_account_number"},{"id":"company_bank_ifsc"}]'>
     <div class="label">Payment</div>
-    <div class="muted">UPI: {{ payment.upi }}</div>
-    <div class="muted" data-if="payment.bankName">Bank: {{ payment.bankName }} · A/C {{ payment.accountNumber }} · IFSC {{ payment.ifsc }}</div>
+    <div class="muted" data-if="company_upi_id">UPI: {{ company_upi_id }}</div>
+    <div class="muted" data-if="company_bank_account_number">Bank: {{ company_bank_name }} · A/C {{ company_bank_account_number }} · IFSC {{ company_bank_ifsc }}</div>
   </div>
 
-  <div class="notes" data-section="notes" data-if="invoice.notes">{{ invoice.notes }}</div>
+  <div class="notes" data-section="notes" data-section-label="Notes" data-if="notes"
+       data-fields='[{"id":"notes","type":"multiline","label":"Notes","default":{"kind":"setting","id":"settings_default_notes"}}]'>{{ notes }}</div>
 </div>`,
   css: `
 .page { padding: 44px; font-family: Inter; font-size: 10pt; color: #1f2430; line-height: 1.45; }
@@ -119,43 +138,47 @@ const MINIMAL: SeedTemplate = {
   isPremium: false,
   html: `
 <div class="page" data-page-size="A4" data-token="color:accent" data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Colour","token":"accent"}]'>
-  <div class="head" data-section="header">
+  <div class="head" data-section="header" data-section-label="Invoice details" data-hidable="false"
+       data-fields='[{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Date","default":{"kind":"today"}}]'>
     <div class="title" data-token="color:accent">Invoice</div>
-    <div class="no">{{ invoice.number }}</div>
+    <div class="no">{{ invoice_number }}</div>
   </div>
-  <div class="row" data-section="parties">
+  <div class="row" data-section="parties" data-section-label="From and to" data-hidable="false"
+       data-fields='[{"id":"company_name"},{"id":"company_city"},{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_city"},{"id":"customer_state"}]'>
     <div>
       <div class="k">From</div>
-      <div class="v">{{ company.name }}</div>
-      <div class="s">{{ company.city }}</div>
+      <div class="v">{{ company_name }}</div>
+      <div class="s">{{ company_city }}</div>
     </div>
     <div>
       <div class="k">To</div>
-      <div class="v">{{ customer.name }}</div>
-      <div class="s">{{ customer.city }}</div>
+      <div class="v">{{ customer_name }}</div>
+      <div class="s">{{ customer_city }}</div>
     </div>
     <div>
       <div class="k">Date</div>
-      <div class="v">{{ invoice.date | date }}</div>
+      <div class="v">{{ invoice_date | date }}</div>
     </div>
   </div>
 
-  <table class="items" data-section="items">
+  <table class="items" data-section="items" data-section-label="Items" data-hidable="false"
+         data-fields='[{"id":"line_items","label":"Items","columns":${LINE_COLUMNS}}]'>
     <thead>
       <tr><th class="desc" data-token="borderBottomColor:accent">Item</th><th class="num" data-token="borderBottomColor:accent">Qty</th><th class="num" data-token="borderBottomColor:accent">Amount</th></tr>
     </thead>
     <tbody>
-      <tr data-repeat="items as item">
+      <tr data-repeat="line_items as item">
         <td>{{ item.description }}</td>
         <td class="num">{{ item.quantity | number }}</td>
-        <td class="num">{{ item.amount | currency }}</td>
+        <td class="num">{{ item.line_total | currency }}</td>
       </tr>
     </tbody>
   </table>
 
-  <div class="total" data-section="totals" data-token="borderTopColor:accent">
+  <div class="total" data-section="totals" data-section-label="Total" data-hidable="false" data-token="borderTopColor:accent"
+       data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total due"}]'>
     <span class="k">Total due</span>
-    <span class="amt">{{ invoice.total | currency }}</span>
+    <span class="amt">{{ grand_total | currency }}</span>
   </div>
   <div class="thanks">Thank you for your business.</div>
 </div>`,
@@ -187,40 +210,45 @@ const BOLD: SeedTemplate = {
   isPremium: true,
   html: `
 <div class="page" data-page-size="A4">
-  <div class="banner" data-section="header" data-token="backgroundColor:accent">
-    <div class="bname">{{ company.name }}</div>
-    <div class="binvoice">INVOICE #{{ invoice.number }}</div>
+  <div class="banner" data-section="header" data-section-label="Invoice details" data-hidable="false" data-token="backgroundColor:accent"
+       data-fields='[{"id":"company_name"},{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Issued","default":{"kind":"today"}}]'>
+    <div class="bname">{{ company_name }}</div>
+    <div class="binvoice">INVOICE #{{ invoice_number }}</div>
   </div>
   <div class="body">
-    <div class="parties" data-section="parties">
+    <div class="parties" data-section="parties" data-section-label="Billed to" data-hidable="false"
+         data-fields='[{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_address_line1"},{"id":"customer_state"}]'>
       <div>
         <div class="k">Billed to</div>
-        <div class="v">{{ customer.name }}</div>
-        <div class="s">{{ customer.addressLine1 }}</div>
+        <div class="v">{{ customer_name }}</div>
+        <div class="s">{{ customer_address_line1 }}</div>
       </div>
       <div class="right">
         <div class="k">Issued</div>
-        <div class="v">{{ invoice.date | date }}</div>
+        <div class="v">{{ invoice_date | date }}</div>
       </div>
     </div>
 
-    <table class="items" data-section="items">
+    <table class="items" data-section="items" data-section-label="Items" data-hidable="false"
+           data-fields='[{"id":"line_items","label":"Items","columns":${LINE_COLUMNS}}]'>
       <thead>
         <tr><th data-token="color:accent">Description</th><th class="num" data-token="color:accent">Qty</th><th class="num" data-token="color:accent">Amount</th></tr>
       </thead>
       <tbody>
-        <tr data-repeat="items as item">
+        <tr data-repeat="line_items as item">
           <td>{{ item.description }}</td>
           <td class="num">{{ item.quantity | number }}</td>
-          <td class="num">{{ item.amount | currency }}</td>
+          <td class="num">{{ item.line_total | currency }}</td>
         </tr>
       </tbody>
     </table>
 
-    <div class="summary" data-section="totals">
-      <div class="line"><span>Subtotal</span><span>{{ invoice.subtotal | currency }}</span></div>
-      <div class="line"><span>Tax</span><span>{{ invoice.tax | currency }}</span></div>
-      <div class="line grand" data-token="borderTopColor:accent"><span>Total</span><span>{{ invoice.total | currency }}</span></div>
+    <div class="summary" data-section="totals" data-section-label="Total" data-hidable="false"
+         data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total"}]'>
+      <div class="line"><span>Subtotal</span><span>{{ subtotal | currency }}</span></div>
+      <div class="line" data-if="discount_total"><span>Discount</span><span>-{{ discount_total | currency }}</span></div>
+      <div class="line"><span>Tax</span><span>{{ tax_total | currency }}</span></div>
+      <div class="line grand" data-token="borderTopColor:accent"><span>Total</span><span>{{ grand_total | currency }}</span></div>
     </div>
   </div>
 </div>`,

@@ -6,7 +6,8 @@ import { ValueError } from "./errors";
 // helpers are pure and location-unaware — they throw ValueError, and the compiler re-throws
 // it as a located CompileError (phase "binding").
 
-// A dotted path of identifiers: invoice.number, item.description, items, payment.upi.
+// A dotted path of identifiers: invoice_number, item.description, company_logo.url. (Which paths
+// a template may actually use is checked against its field lists by the compiler.)
 const PATH = /^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$/;
 const FORMATS: BindingFormat[] = ["text", "currency", "date", "number"];
 
@@ -114,19 +115,19 @@ export const parseSingleBinding = (value: string): Value => {
   const trimmed = value.trim();
   const m = /^\{\{([^]*?)\}\}$/.exec(trimmed);
   if (!m) {
-    throw new ValueError(`expected a single binding like {{ company.logo }}, got "${value}"`);
+    throw new ValueError(`expected a single binding like {{ company_logo.url }}, got "${value}"`);
   }
   return parseBindingExpression(m[1]);
 };
 
 /**
- * Parse a `data-repeat="items as item"` expression into a RepeatBinding.
+ * Parse a `data-repeat="line_items as item"` expression into a RepeatBinding.
  * Both the path and the alias are validated as identifiers.
  */
 export const parseRepeatExpression = (raw: string): RepeatBinding => {
   const m = /^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/.exec(raw);
   if (!m) {
-    throw new ValueError(`data-repeat must look like "items as item" (got "${raw}")`);
+    throw new ValueError(`data-repeat must look like "line_items as item" (got "${raw}")`);
   }
   // The alias becomes an object key (scope[as] = item) on the client, so guard it against the
   // same prototype-polluting names as a path segment.

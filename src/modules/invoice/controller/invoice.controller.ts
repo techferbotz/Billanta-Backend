@@ -40,7 +40,7 @@ export const getInvoice = async (req: Request<{ id: string }>, res: Response): P
   sendSuccess(res, await invoiceService.getById(getUserId(req), req.params.id));
 };
 
-// PATCH /invoices/:id — quick scalar edits (status, notes, dueDate, pdfPath, …).
+// PATCH /invoices/:id — status, pdfPath and/or a merge into `values` (recomputed).
 export const patchInvoice = async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   const userId = getUserId(req);
   const patch = parseInvoicePatch(requireObjectBody(req.body));

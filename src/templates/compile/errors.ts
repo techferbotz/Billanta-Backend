@@ -8,7 +8,7 @@
 // This is a plain error (NOT an AppError): the compiler is a pure library that the admin
 // service calls and turns into a 400 with the message. Keeping it decoupled means the
 // compiler can be unit-tested and reused without the HTTP error stack.
-export type CompilePhase = "html" | "css" | "binding" | "structure";
+export type CompilePhase = "html" | "css" | "binding" | "structure" | "fields";
 
 export class CompileError extends Error {
   public readonly phase: CompilePhase;

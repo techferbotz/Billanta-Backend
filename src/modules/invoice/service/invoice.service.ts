@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { InvoiceStatus, Prisma } from "@prisma/client";
 import {
   invoiceRepository,
   InvoiceWithItems,
@@ -8,10 +8,14 @@ import {
 import { PageParams, PaginatedResult } from "../../../common/pagination";
 import { BadRequestError, ConflictError, NotFoundError } from "../../../common/errors/AppError";
 import { calculateInvoice } from "../../../common/money";
+import { mergeValues, storedValues, Values } from "../../../fields/values";
 import {
   InvoiceDto,
   InvoicePatch,
   ParsedInvoiceInput,
+  ParsedLine,
+  derivedColumnsOf,
+  moneyInputsOf,
   toInvoiceDto,
 } from "../dto/invoice.dto";
 import { SyncCursor, encodeSyncCursor } from "../syncCursor";
@@ -31,14 +35,33 @@ export interface SyncResult {
   hasMore: boolean;
 }
 
+// Everything one write is computed from: a parsed POST body, or a stored invoice with a PATCH
+// applied to it.
+export interface InvoiceState {
+  status: InvoiceStatus;
+  templateId: string;
+  templateVersion: number;
+  values: Values;
+  lines: ParsedLine[];
+  themeOverrides: Prisma.InputJsonValue | undefined;
+  hiddenSections: Prisma.InputJsonValue | undefined;
+  pdfPath: string | null | undefined;
+  updatedAt: Date;
+  deletedAt: Date | null;
+}
+
+// A stored JSON column back as write input (JSON null -> absent).
+const jsonOrUndefined = (v: Prisma.JsonValue | null): Prisma.InputJsonValue | undefined =>
+  v === null ? undefined : (v as Prisma.InputJsonValue);
+
 export class InvoiceService {
   /**
-   * Create or replace an invoice. The server ALWAYS recomputes totals from the items and
+   * Create or replace an invoice. The server ALWAYS recomputes totals from the lines and
    * stores its own values — the client's advisory totals are ignored — and returns them so a
    * client that computed differently can correct itself.
    */
   async upsert(userId: string, parsed: ParsedInvoiceInput): Promise<InvoiceDto> {
-    const { data, items } = this.build(parsed);
+    const { data, items } = buildInvoiceWrite(parsed);
     const inv = parsed.id
       ? await invoiceRepository.upsertOwn(userId, parsed.id, data, items)
       : await invoiceRepository.createNew(userId, data, items);
@@ -63,17 +86,21 @@ export class InvoiceService {
     return { ...result, items: result.items.map(toInvoiceDto) };
   }
 
+  /**
+   * Apply a PATCH: status, pdfPath and/or a merge into `values`. The invoice is recomputed from
+   * its stored lines and the merged values, because a values patch can move the totals (a new
+   * discount) or the derived columns (a new number).
+   */
   async patch(userId: string, id: string, patch: InvoicePatch): Promise<InvoiceDto> {
-    const update: Prisma.InvoiceUpdateInput = { updatedAt: patch.updatedAt };
-    if (patch.status !== undefined) update.status = patch.status;
-    if (patch.notes !== undefined) update.notes = patch.notes;
-    if (patch.dueDate !== undefined) update.dueDate = patch.dueDate;
-    if (patch.pdfPath !== undefined) update.pdfPath = patch.pdfPath;
-    if (patch.invoiceDate !== undefined) update.invoiceDate = patch.invoiceDate;
-    if (patch.invoiceNumber !== undefined) update.invoiceNumber = patch.invoiceNumber;
-    if (patch.currency !== undefined) update.currency = patch.currency;
-
-    const inv = await invoiceRepository.patchOwn(userId, id, update, patch.invoiceNumber);
+    const inv = await invoiceRepository.rewriteOwn(userId, id, (current) =>
+      buildInvoiceWrite({
+        ...this.stateOf(current),
+        status: patch.status ?? current.status,
+        values: patch.values ? mergeValues(storedValues(current.values), patch.values) : storedValues(current.values),
+        pdfPath: patch.pdfPath,
+        updatedAt: patch.updatedAt,
+      })
+    );
     if (!inv) throw new NotFoundError("Invoice not found");
     return toInvoiceDto(inv);
   }
@@ -111,7 +138,7 @@ export class InvoiceService {
         continue;
       }
       // Last-write-wins: skip if the server's copy is the same age or newer.
-      if (stamp && stamp.updatedAt.getTime() >= push.data.updatedAt.getTime()) {
+      if (stamp && stamp.updatedAt.getTime() >= push.updatedAt.getTime()) {
         continue;
       }
       // build() (recompute) can itself throw a BadRequestError — e.g. the aggregate-overflow
@@ -119,7 +146,7 @@ export class InvoiceService {
       // per-item conflict rather than aborting the whole batch (which would permanently wedge the
       // device: it re-pushes the same batch, re-throws, and never drains its other changes).
       try {
-        const { data, items } = this.build(push);
+        const { data, items } = buildInvoiceWrite(push);
         await invoiceRepository.upsertOwn(userId, id, data, items);
       } catch (err) {
         if (err instanceof ConflictError || err instanceof BadRequestError) {
@@ -145,46 +172,72 @@ export class InvoiceService {
     return { changed: page.map(toInvoiceDto), conflicts, nextCursor, hasMore };
   }
 
-  // Recompute totals from items and assemble the repository write payload.
-  private build(parsed: ParsedInvoiceInput): {
-    data: InvoiceWriteData;
-    items: InvoiceItemWriteData[];
-  } {
-    const money = calculateInvoice(parsed.moneyItems, parsed.discount, {
-      discountBeforeTax: parsed.data.discountBeforeTax,
-    });
-
-    // Guard against aggregate overflow: individual paise are bounded to a safe integer, but a
-    // sum across many lines could still exceed it. If it does, refuse rather than store a
-    // silently-imprecise BigInt.
-    for (const total of [money.subtotal, money.discountTotal, money.taxTotal, money.grandTotal]) {
-      if (total > Number.MAX_SAFE_INTEGER) {
-        throw new BadRequestError("Invoice total exceeds the supported maximum");
-      }
-    }
-
-    const data: InvoiceWriteData = {
-      ...parsed.data,
-      subtotal: BigInt(money.subtotal),
-      discountTotal: BigInt(money.discountTotal),
-      taxTotal: BigInt(money.taxTotal),
-      grandTotal: BigInt(money.grandTotal),
+  // A stored invoice as the state a write is computed from.
+  private stateOf(inv: InvoiceWithItems): InvoiceState {
+    return {
+      status: inv.status,
+      templateId: inv.templateId,
+      templateVersion: inv.templateVersion,
+      values: storedValues(inv.values),
+      lines: inv.items.map((it) => ({ lineId: it.lineId, values: storedValues(it.values) })),
+      themeOverrides: jsonOrUndefined(inv.themeOverrides),
+      hiddenSections: jsonOrUndefined(inv.hiddenSections),
+      pdfPath: undefined,
+      updatedAt: inv.updatedAt,
+      deletedAt: inv.deletedAt,
     };
-
-    const items: InvoiceItemWriteData[] = parsed.items.map((it, i) => ({
-      position: it.position,
-      description: it.description,
-      hsnSac: it.hsnSac,
-      quantity: it.quantity,
-      unitPrice: BigInt(it.unitPrice),
-      taxRatePercent: it.taxRatePercent,
-      taxAmount: BigInt(money.lines[i].taxAmount),
-      lineTotal: BigInt(money.lines[i].lineTotal),
-    }));
-
-    return { data, items };
   }
+
 }
+
+/**
+ * Recompute totals from the lines and assemble the repository write payload. Pure (no I/O), so the
+ * contract-example generator can produce a response exactly as a real write would.
+ */
+export const buildInvoiceWrite = (
+  state: InvoiceState
+): { data: InvoiceWriteData; items: InvoiceItemWriteData[] } => {
+  const money = moneyInputsOf(state.values, state.lines.map((l) => l.values));
+  const totals = calculateInvoice(money.lines, money.discount, {
+    discountBeforeTax: money.discountBeforeTax,
+  });
+
+  // Guard against aggregate overflow: individual paise are bounded to a safe integer, but a
+  // sum across many lines could still exceed it. If it does, refuse rather than store a
+  // silently-imprecise BigInt.
+  for (const total of [totals.subtotal, totals.discountTotal, totals.taxTotal, totals.grandTotal]) {
+    if (total > Number.MAX_SAFE_INTEGER) {
+      throw new BadRequestError("Invoice total exceeds the supported maximum");
+    }
+  }
+
+  const data: InvoiceWriteData = {
+    status: state.status,
+    templateId: state.templateId,
+    templateVersion: state.templateVersion,
+    values: state.values,
+    ...derivedColumnsOf(state.values, state.deletedAt !== null),
+    themeOverrides: state.themeOverrides,
+    hiddenSections: state.hiddenSections,
+    pdfPath: state.pdfPath,
+    updatedAt: state.updatedAt,
+    deletedAt: state.deletedAt,
+    subtotal: BigInt(totals.subtotal),
+    discountTotal: BigInt(totals.discountTotal),
+    taxTotal: BigInt(totals.taxTotal),
+    grandTotal: BigInt(totals.grandTotal),
+  };
+
+  const items: InvoiceItemWriteData[] = state.lines.map((line, i) => ({
+    lineId: line.lineId,
+    position: i,
+    values: line.values,
+    taxAmount: BigInt(totals.lines[i].taxAmount),
+    lineTotal: BigInt(totals.lines[i].lineTotal),
+  }));
+
+  return { data, items };
+};
 
 // Re-exported so the controller can type the status filter without importing Prisma.
 export type InvoiceStatusFilter = "Draft" | "Pending" | "Paid";

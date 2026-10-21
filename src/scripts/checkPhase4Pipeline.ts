@@ -40,10 +40,12 @@ const call = async (
   };
 };
 
-// A tiny valid template and an invalid one.
-const HTML = `<div data-page-size="A4"><h1>{{ invoice.number }}</h1><table><tbody><tr data-repeat="items as item"><td>{{ item.description }}</td><td>{{ item.amount | currency }}</td></tr></tbody></table></div>`;
+// A tiny valid template, an invalid one, and one that prints a field no section lists.
+const FIELDS = `[{"id":"invoice_number","label":"No."},{"id":"line_items","label":"Items","columns":[{"id":"description"},{"id":"line_total"}]}]`;
+const HTML = `<div data-page-size="A4" data-section="main" data-fields='${FIELDS}'><h1>{{ invoice_number }}</h1><table><tbody><tr data-repeat="line_items as item"><td>{{ item.description }}</td><td>{{ item.line_total | currency }}</td></tr></tbody></table></div>`;
 const CSS = `.page { padding: 40px; } h1 { font-size: 20px; color: #123456; }`;
 const BAD_HTML = `<div><script>alert(1)</script></div>`;
+const UNLISTED_HTML = `<div data-page-size="A4"><h1>{{ po_number }}</h1></div>`;
 
 const FREE = "test-free-tmpl";
 const PREM = "test-prem-tmpl";
@@ -67,11 +69,15 @@ const main = async (): Promise<void> => {
   const bad = await call("POST", `/admin/templates/${FREE}/versions`, { headers: adminHeaders, body: { html: BAD_HTML, css: "" } });
   ok("invalid template -> 400 TEMPLATE_COMPILE_FAILED", bad.status === 400 && bad.body.code === "TEMPLATE_COMPILE_FAILED", JSON.stringify(bad.body));
   ok("compile error names the offending tag", /unsupported tag <script>/.test(bad.body.message || ""), bad.body.message);
+  const unlisted = await call("POST", `/admin/templates/${FREE}/versions`, { headers: adminHeaders, body: { html: UNLISTED_HTML, css: "" } });
+  ok("a template printing an unlisted field -> 400 naming it", unlisted.status === 400 && /po_number/.test(unlisted.body.message || ""), unlisted.body.message);
   const draftCount = await prisma.templateVersion.count({ where: { templateId: FREE } });
-  ok("rejected template is NOT stored", draftCount === 0, `found ${draftCount} versions`);
+  ok("rejected templates are NOT stored", draftCount === 0, `found ${draftCount} versions`);
 
   const v1 = await call("POST", `/admin/templates/${FREE}/versions`, { headers: adminHeaders, body: { html: HTML, css: CSS } });
-  ok("valid template -> 201 draft v1 with compiled JSON", v1.status === 201 && v1.body.data.version === 1 && v1.body.data.compiled.schemaVersion === 1);
+  ok("valid template -> 201 draft v1 with compiled JSON", v1.status === 201 && v1.body.data.version === 1 && v1.body.data.compiled.schemaVersion === 2);
+  ok("the compiled draft carries its section's fields",
+    v1.body.data.compiled.sections?.[0]?.fields?.map((f: any) => f.id).join(",") === "invoice_number,line_items", JSON.stringify(v1.body.data.compiled.sections));
 
   console.log("\npublic serving before publish");
   const preList = await call("GET", "/templates");

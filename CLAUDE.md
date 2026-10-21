@@ -4,7 +4,9 @@
 > Deeper docs live in [`docs/`](docs/): [`API.md`](docs/API.md) (every endpoint),
 > [`TEMPLATE_AUTHORING.md`](docs/TEMPLATE_AUTHORING.md) (the HTML/CSS subset for designers),
 > [`TEMPLATE_JSON.md`](docs/TEMPLATE_JSON.md) (the render-tree contract the Android app is built
-> against), [`MONEY.md`](docs/MONEY.md) (the calculation spec the client mirrors),
+> against), [`FIELDS.md`](docs/FIELDS.md) (field ids, types, forms and values maps — what every
+> section, form and record is made of; [`FIELDS_APP_GUIDE.md`](docs/FIELDS_APP_GUIDE.md) is the app's
+> build plan for it, against [`docs/examples/`](docs/examples/)), [`MONEY.md`](docs/MONEY.md) (the calculation spec the client mirrors),
 > [`REMOTE_CONFIG.md`](docs/REMOTE_CONFIG.md) (the `GET /config` behaviour switches), and
 > [`DEPLOY.md`](docs/DEPLOY.md) (the EC2 runbook).
 
@@ -92,12 +94,14 @@ npm run seed:templates      # publish the starter templates (needs DB + migratio
 
 # Verification scripts (no DB needed unless noted):
 npm run check:auth          # refresh-token rotation + theft detection (in-memory)
-npm run check:phase3v       # company/settings/customer/product validation (incl. photo URLs)
+npm run check:phase3v       # values-map validation for company/settings/customer/product/invoice
+npm run check:forms         # field registry + the four global forms (ids, owners, prefixes, defaults)
 npm run check:compiler      # template compiler: structure, determinism, exact-location rejects
 npm run check:seeds         # every seed template compiles deterministically
 npm run check:thumbnails    # picker-thumbnail renderer: layout rules + seed renders to the APP-012 spec
 npm run thumbnail:render -- --html t.html --css t.css --out t.png   # preview a thumbnail locally
 npm run thumbnails:backfill # render any missing thumbnails via the admin API (needs ADMIN_API_KEY)
+npm run docs:examples       # regenerate docs/examples/ (the app's contract fixtures) from the real code
 npm run check:money         # invoice calculation fixtures (exact paise)
 npm run check:config        # remote config: strict merge, header parsing, resolve order, fail-fast
 npm run check:legal         # legal pages: required sections, quoted constants, /config links match
@@ -145,7 +149,15 @@ src/
   app.ts                        # express bootstrap: middleware → health → legal → routes → 404 → errorHandler
   config/env.ts                 # loads + validates env, exports typed `config` (only reader of process.env)
   prisma/client.ts              # singleton PrismaClient
+  prisma/serializable.ts        # serializable read-modify-write with retry (values-map PATCH merges)
   types/express.d.ts            # adds req.userId
+  fields/                       # SERVER-DRIVEN FIELDS (docs/FIELDS.md) — pure, no Prisma, no HTTP
+    registry.ts                 #   every field id + its owner (and the few fixed types); additive only
+    types.ts                    #   field types, wire kinds, the resolved FieldDefinition shape
+    resolve.ts                  #   authored field definition -> resolved one (shared by forms + compiler)
+    forms.ts                    #   the 4 global forms (company/customer/product/settings) + GET /forms doc
+    optionLists.ts              #   named select options (indian_states)
+    wire.ts / values.ts         #   per-wire-kind checks; values-map parse/merge for every record
   common/
     response/apiResponse.ts     # sendSuccess() + envelope types
     errors/AppError.ts          # AppError (+code) + Bad/Unauthorized/Forbidden/NotFound/Conflict/ServiceUnavailable
@@ -154,8 +166,8 @@ src/
     utils/                      # asyncHandler, jwt (access + refresh helpers), getUserId
     pagination.ts               # cursor pagination { items, nextCursor, hasMore }
     deepMerge.ts                # deepMergeStrict: patch must fit the base's shape, or it throws
-    validation.ts               # shared input validators (string/number/currency/uuid/decimal/…)
-    gstin.ts                    # GSTIN checksum + state-code reconciliation
+    validation.ts               # shared request-shape validators (string/uuid/object body)
+    values.ts                   # parseValuesOr400: fields/values.ts at the HTTP edge
     money.ts                    # THE calculation module (see docs/MONEY.md). Pure; decimal.js; never floats
   auth/googleVerifier.ts        # the ONLY importer of google-auth-library
   storage/
@@ -172,9 +184,10 @@ src/
       sampleInvoice.ts          #   the one fixed, fictional dataset every thumbnail renders with
       renderThumbnail.ts        #   forks thumbnailWorker.ts per render (heap cap + 30s deadline)
   modules/                      # feature modules: routes → controller → service → repository → dto
-    auth/ user/ company/ settings/ customer/ invoice/ template/ media/ admin/ legal/
+    auth/ user/ company/ settings/ customer/ product/ invoice/ template/ media/ admin/ legal/
     legal/                      # /privacy /terms /delete-account — HTML rendered from legal.view.ts constants
     remoteConfig/               # GET /config — defaults + env overrides + targeting rules; no DB
+    forms/                      # GET /forms — the global forms from src/fields/forms.ts; no DB
   scripts/                      # the check:* verification scripts
 assets/fonts/                   # the app's 5 font families (static TTFs + OFL licences), for thumbnails
 docker-compose.yml              # dev (includes postgres:16)
@@ -200,6 +213,14 @@ Dockerfile                      # multi-stage builder + runner (non-root)
   soft-delete `deletedAt` tombstone.
 - **Money is never a float.** Integer paise in `BigInt` columns, serialized as **strings**; all
   arithmetic goes through `src/common/money.ts` (decimal.js, half-up). See [`docs/MONEY.md`](docs/MONEY.md).
+- **Records are values maps, and the backend defines every field** ([`docs/FIELDS.md`](docs/FIELDS.md)).
+  Company, customer, product, settings, invoice and line data is a `values` JSON map of field id →
+  value; the few typed columns beside it are derived on write (search, uniqueness, totals). A new
+  field is a `src/fields/registry.ts` entry (+ its form, for an entity field) — **never a migration
+  and never an app release**. Ids are additive only: never rename or re-own one. Templates declare
+  each section's fields (`data-fields`) and the compiler rejects any printed path that isn't a listed
+  field. The server never rejects a value for its *format* (GSTIN, phone…) — only for its shape and
+  size, plus the money inputs it calculates with.
 - **The remote config document is additive-only.** `GET /config` is what lets us change app
   behaviour without a release, and it only works because clients ignore keys they don't know and
   default the ones they're missing. Adding a key is free; removing or renaming one breaks old
@@ -268,3 +289,8 @@ Dockerfile                      # multi-stage builder + runner (non-root)
    compiled tree with a fixed sample invoice (satori + resvg in a sandboxed child process), stores a
    640px WebP in S3 under a content-hashed key, and serves it as `thumbnailUrl`. Per-version
    thumbnail fields, a retry endpoint + panel button, and `check:thumbnails`.
+10. **Server-driven fields (BE-021, 2026-10-21)** — a clean break while the app had no users: the
+   field registry + four global forms (`GET /forms`), templates declaring each section's fields
+   (compiler v2: flat field-id bindings, hideable columns/rows, `edits` gone), every record stored as
+   a `values` map (migration `server_driven_fields` discards the old rows), device-only `remember`,
+   and `check:forms`. Spec: [`docs/FIELDS.md`](docs/FIELDS.md).

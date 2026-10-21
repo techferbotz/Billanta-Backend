@@ -22,14 +22,15 @@ capabilities — new node types, new style properties — by publishing a new te
 
 ```json
 {
-  "schemaVersion": 1,
-  "compilerVersion": 1,
+  "schemaVersion": 2,
+  "compilerVersion": 2,
   "page": {
     "size": "A4",
     "margin": { "top": 36, "right": 36, "bottom": 36, "left": 36 },
     "fontFamily": "Inter",
     "baseFontSize": 11
   },
+  "sections": [ { "id": "header", "label": "Invoice details", "hidable": false, "fields": [ ... ] } ],
   "root": { "type": "box", "style": { ... }, "children": [ ... ] }
 }
 ```
@@ -41,9 +42,13 @@ capabilities — new node types, new style properties — by publishing a new te
 - `page.size` is `"A4"` for V1 (the field exists so more can be added compatibly).
 - `page.margin` is in **points**, derived from the root element's padding (default 36pt ≈ 0.5in).
 - `page.fontFamily` / `page.baseFontSize` (points) are the document defaults.
-- `theme`, `sections` and `customisation` (all **optional**) — the template-customisation layer,
-  present only when the template declares colour tokens / named sections / an explicit control list.
-  See "Template customisation" below.
+- `sections` — **always present** (empty when nothing is tagged): the blocks of the invoice, each
+  with the fields its editor shows. See "Sections and their fields" below.
+- `theme` and `customisation` (both **optional**) — colour tokens and an explicit control list,
+  present only when the template declares them. See "Template customisation" below.
+- Version 2 (server-driven fields, [FIELDS.md](FIELDS.md)) replaced section `edits` with field lists
+  and the dotted binding paths (`invoice.number`) with flat field ids (`invoice_number`). A version-1
+  tree is not served any more.
 
 ## Units, colors, values
 
@@ -92,11 +97,12 @@ A dynamic value is a **literal** or a **binding**:
 
 ```json
 { "kind": "literal", "text": "Invoice" }
-{ "kind": "bind", "path": "invoice.number", "format": "text", "fallback": "" }
+{ "kind": "bind", "path": "invoice_number", "format": "text", "fallback": "" }
 ```
 
-- `path` — a dotted path into the invoice data (see the binding namespace below). Inside a
-  `repeat`/table body it uses the loop alias (e.g. `item.amount`).
+- `path` — a field id, resolved against the render context (see "Bindings" below). Inside a
+  `repeat`/table body it uses the loop alias (`item.line_total`); an image's url is
+  `company_logo.url`.
 - `format` — a **hint** for the client: `"text" | "currency" | "date" | "number"`. Formatting stays
   on the client, which formats using the invoice's currency and locale (so a currency binding is
   printed as, e.g., `₹5,310.00`). The compiler never formats.
@@ -108,7 +114,7 @@ theme rather than keeping the literal hex:
 
 ```json
 { "value": { "kind": "literal", "text": "Total: " } }
-{ "value": { "kind": "bind", "path": "invoice.total", "format": "currency", "fallback": "" },
+{ "value": { "kind": "bind", "path": "grand_total", "format": "currency", "fallback": "" },
   "style": { "fontWeight": 700, "color": "#222831" }, "tokens": { "color": "accent" } }
 ```
 
@@ -122,8 +128,8 @@ Every node has `type` and `style`.
 | `text` | `{ type, style, spans: Span[] }` | a paragraph; merge each span's `style` over the node's |
 | `image` | `{ type, style, source: Value, fit: "contain"\|"cover" }` | `source` is always a binding (external URLs are rejected at compile time) |
 | `divider` | `{ type, style }` | a horizontal rule |
-| `table` | `{ type, style, columns: [{width: number\|"auto"}], header: Row[], body: TableBody, footer: Row[] }` | see below |
-| `row` | `{ type, style, cells: Cell[] }` | |
+| `table` | `{ type, style, columns: [{width: number\|"auto", visibleIf?}], header: Row[], body: TableBody, footer: Row[] }` | see below |
+| `row` | `{ type, style, visibleIf?, cells: Cell[] }` | a static row with `visibleIf` is drawn only when it's on (see below) |
 | `cell` | `{ type, style, colSpan: number, children: Node[] }` | |
 | `repeat` | `{ type, path, as, child: Node }` | render `child` once per element of the array at `path`, binding each to `as` |
 | `conditional` | `{ type, path, negate?, child: Node }` | render `child` only when `path` is truthy; with `negate: true` (from `data-unless`) only when it is FALSY |
@@ -131,13 +137,24 @@ Every node has `type` and `style`.
 **`TableBody`** is EITHER a repeating row or a list of static rows (never both):
 
 ```json
-"body": { "repeat": { "path": "items", "as": "item" }, "row": { "type": "row", ... } }
+"body": { "repeat": { "path": "line_items", "as": "item" }, "row": { "type": "row", ... } }
 "body": { "rows": [ { "type": "row", ... } ] }
 ```
 
 `columns` gives each column a `width` (points, or `"auto"` to size to content), expanded for
 `colSpan`. When a `repeat`/`conditional` wraps an element that also has the other, the
-`conditional` is outermost (gate, then repeat).
+`conditional` is outermost (gate, then repeat). A repeat only ever iterates `line_items`.
+
+**`visibleIf`** — `{ "path": "<field id>", "negate"?: true }`, the same gate as a `conditional`
+(shown when the value is truthy; with `negate`, when it's falsy):
+
+- **On a column**, it hides the whole column. Drop that column's cells in every row; a cell whose
+  `colSpan` covers hidden columns shrinks by that many, and a cell whose whole span is hidden is
+  dropped; lay the remaining columns out as if the hidden one never existed.
+- **On a row** (only ever a static row — header, footer, or a body without a repeat), it leaves the
+  row out.
+
+A renderer that ignores `visibleIf` draws every column and row — the safe fallback.
 
 Additionally, **any node may carry optional keys** — `section` (a string id) and `tokens` (a style-key
 → token-name map) for the customisation layer described next, and **`editorOnly: true`** (APP-008): the
@@ -146,12 +163,39 @@ template can author an empty-state placeholder that never prints on a real invoi
 appear only on tagged nodes. A renderer that ignores them draws as before — which means it would print
 an `editorOnly` node, so only mark nodes that are safe to omit.
 
-## Template customisation — colour tokens + named sections (optional)
+## Sections and their fields
 
-Two optional, additive layers let the app **recolour** a template and **hide blocks** at render
-time, with no bespoke server compile and no change to `(templateId, version)` immutability. Both
-obey the forward-compatibility rule: a template that omits them is unchanged, and a renderer that
-ignores them renders exactly as today.
+Document-level `sections` lists the blocks of the invoice, in the **editor's order**. Each one carries
+the fields its editor shows, fully resolved (owner, type, label and options already filled in), so the
+app builds the editor from this alone:
+
+```json
+"sections": [
+  { "id": "header", "label": "Invoice details", "hidable": false,
+    "fields": [
+      { "id": "invoice_number", "owner": "invoice", "type": "invoice_number", "label": "Invoice no." },
+      { "id": "invoice_date",   "owner": "invoice", "type": "date", "label": "Date", "default": { "kind": "today" } },
+      { "id": "po_number",      "owner": "invoice", "type": "text", "label": "PO number", "remember": true }
+    ] },
+  { "id": "payment", "label": "Payment details", "hidable": true,
+    "fields": [ { "id": "company_upi_id", "owner": "company", "type": "upi_id", "label": "UPI ID" } ] }
+]
+```
+
+- The **template** chooses each section's `id`, `label` and `hidable`. The nodes of a section carry
+  `"section": "<id>"` — possibly several nodes, at any depth. The app hides every node of a section
+  whose id is in the invoice's `hiddenSections`.
+- **`fields`** are field definitions — the full spec (types, attributes, defaults, `remember`,
+  where each value is saved, and what happens when a field is edited) is
+  [FIELDS.md](FIELDS.md) §4 and §8. A field belongs to one section but may be printed anywhere.
+- An unknown field `type` draws its `fallbackType`, or is hidden; an unknown attribute is ignored.
+
+## Template customisation — colour tokens (optional)
+
+Two optional, additive layers let the app **recolour** a template and pick the controls of its
+customisation sheet at render time, with no bespoke server compile and no change to
+`(templateId, version)` immutability. A template that omits them is unchanged, and a renderer that
+ignores them draws the template's own colours.
 
 ### Colour tokens
 
@@ -189,37 +233,6 @@ that draws them. A **span** whose own `color` would otherwise override its node'
 own `tokens.color` too (APP-006). Net effect: every element — node or span — rendered in a token's
 colour carries the token, so an override never leaves a stray run in the old colour.
 
-### Named sections
-
-Document-level `sections` tags the top-level blocks so the app can build show/hide toggles **and its
-sectioned editor**. Each entry also declares `edits` — what data tapping the section edits (APP-007):
-
-```json
-"sections": [
-  { "id": "header",  "label": "Invoice details", "hidable": false, "edits": "invoiceDetails" },
-  { "id": "parties", "label": "Bill to",         "hidable": false, "edits": "customer" },
-  { "id": "items",   "label": "Items",           "hidable": false, "edits": "items" },
-  { "id": "totals",  "label": "Total",           "hidable": false, "edits": "discount" },
-  { "id": "notes",   "label": "Notes",           "hidable": true,  "edits": "notes" },
-  { "id": "payment", "label": "Payment details", "hidable": true,  "edits": "bankDetails" },
-  { "id": "signature", "label": "Signature",     "hidable": true,  "edits": "signature" }
-]
-```
-
-and the corresponding node carries `"section": "payment"`. `hidable: false` marks blocks that must
-always render (invoice details, bill-to, items, total). The app hides a block whose id is in the
-invoice's `hiddenSections`.
-
-- **`edits`** vocabulary: `invoiceDetails`, `customer`, `items`, `discount`, `notes`, `bankDetails`,
-  `signature`, `none`. It is **optional** — absent or an unrecognised value is treated as `none` (shown
-  on the page, absent from the editor list), so a new editor kind ships backend-first. `bankDetails`
-  (bank name / account / IFSC / UPI) and `signature` (signature image + signatory) both edit fields on
-  the **company profile**, but each opens a focused editor — they replaced the earlier `company` value.
-- The **`sections` array order is the editor's fill order** — details, customer, items, total, then
-  the optional blocks.
-- An unknown `section` id is ignored, so the vocabulary can grow. Known ids: `header, parties, items,
-  totals, payment, notes, signature, terms`.
-
 ### Which controls to show (optional)
 
 By default the app builds the customisation sheet by inference — the template switcher, then one
@@ -242,9 +255,9 @@ its sheet outright with a document-level `customisation` array, in display order
 
 - Order is display order. `title` is the label; the app falls back to the token/section id when it's
   omitted.
-- A control naming a token/section the template doesn't declare, or a `type` the app doesn't know, is
-  **ignored** — never a hard error — so new control types ship backend-first, exactly like new node
-  types.
+- The compiler rejects a control naming a token or section the template doesn't declare. A `type` the
+  app doesn't know is **ignored** — never a hard error — so new control types ship backend-first,
+  exactly like new node types.
 - **Omitting `customisation` keeps today's behaviour**: the app synthesises the sheet from
   `theme.tokens` + `sections`. Add the array only where a template wants explicit control (a second
   colour, a renamed or reordered control, exposing only some tokens).
@@ -256,29 +269,31 @@ and syncs across devices: `themeOverrides` (`{ tokenName: "#hex" }`) and `hidden
 (`["sectionId", …]`). See [API.md](API.md) § Invoices. A missing value means "template defaults".
 Not every template declares tokens/sections; the app's controls simply appear when one does.
 
-## Binding namespace
+## Bindings
 
-Paths available to templates:
+Every path a template prints or tests is a **field id** — the same string the editor and the API
+store the value under. The full list is [FIELDS.md](FIELDS.md) §3.3. The render context is flat
+([FIELDS.md](FIELDS.md) §8.1):
 
 ```
-company.*    name, gstin, addressLine1/2, city, state, stateCode, pincode, country,
-             phone, email, logo, signature, upiId, qr, bankName, accountNumber, ifsc
-customer.*   name, gstin, phone, email, addressLine1/2, city, state, stateCode, pincode
-invoice.*    number, date, dueDate, currency, subtotal, tax, discount, total, notes, status
-items[]      description, hsnSac, quantity, unitPrice, taxRate, amount
-payment.*    upi, qr, bankName, accountNumber, ifsc
-signature.*  url, name, designation
+{ ...invoice.values,                       invoice_number, po_number, company_name, customer_gstin, …
+  line_items: [ { ...line.values, line_total, tax_amount }, … ],
+  subtotal, discount_total, tax_total, cgst_total, sgst_total, igst_total, grand_total }
 ```
 
-The concrete data the client binds these against comes from the invoice and its company/customer
-**snapshots** (captured at issue time), so an invoice re-renders identically forever.
+- **Images** are `{ url, thumbnailUrl }`, so an `<img>` binds `company_logo.url`; `company_logo` alone
+  is the image as a whole (for `data-if`).
+- **Inside the repeat**, `item.<id>` is a column of the line (`item.description`, `item.line_total`).
+- **A select prints its option's label**, not its value: `company_state` = `"29"` prints "Karnataka".
+  The label comes from the field's definition in `sections` (an option-list name resolves through
+  `GET /forms` `optionLists`).
+- **Truthiness** (`conditional`, `visibleIf`): absent, `null`, `false`, `""`, a decimal string equal to
+  zero (`"0"`, `"0.00"`), an empty array or an empty object is falsy; everything else is truthy.
+- The compiler guarantees every path is a field some section lists (or a computed id), so everything
+  on the page can be edited and no path is a typo.
 
-> **These are template render paths, not `/company` REST field names.** The client assembles this
-> namespace from the stored profile and renames several leaves: `company.logo` ← `logoUrl`,
-> `company.signature` / `signature.url` ← `signatureUrl`, `company.accountNumber` ← `bankAccountNumber`,
-> `company.ifsc` ← `bankIfsc`, `company.qr` ← `qrImageUrl`. When reading or writing `GET`/`PUT /company`
-> use the **REST** field names — see [API.md § Company](API.md). (`signature.name`/`signature.designation`
-> map to `signatoryName`/`signatoryDesignation`.)
+Because the invoice keeps its own copy of the company and customer values (frozen once it's issued),
+an invoice re-renders identically forever.
 
 ## Determinism
 
@@ -292,17 +307,20 @@ cache a downloaded tree forever.
 Authored:
 
 ```html
-<div class="page" data-page-size="A4">
-  <h1>{{ invoice.number }}</h1>
+<div class="page" data-page-size="A4" data-section="main" data-section-label="Invoice" data-hidable="false"
+     data-fields='[{"id":"invoice_number","label":"No."},
+                   {"id":"line_items","label":"Items","columns":[{"id":"description"},{"id":"line_total"}]},
+                   {"id":"company_upi_id"}]'>
+  <h1>{{ invoice_number }}</h1>
   <table>
     <tbody>
-      <tr data-repeat="items as item">
+      <tr data-repeat="line_items as item">
         <td>{{ item.description }}</td>
-        <td>{{ item.amount | currency }}</td>
+        <td>{{ item.line_total | currency }}</td>
       </tr>
     </tbody>
   </table>
-  <p data-if="payment.upi">Pay: {{ payment.upi }}</p>
+  <p data-if="company_upi_id">Pay: {{ company_upi_id }}</p>
 </div>
 ```
 ```css
@@ -313,37 +331,48 @@ Compiles to (abridged):
 
 ```json
 {
-  "schemaVersion": 1,
-  "compilerVersion": 1,
+  "schemaVersion": 2,
+  "compilerVersion": 2,
   "page": { "size": "A4", "margin": { "top": 30, "right": 30, "bottom": 30, "left": 30 },
             "fontFamily": "Inter", "baseFontSize": 11 },
+  "sections": [
+    { "id": "main", "label": "Invoice", "hidable": false, "fields": [
+      { "id": "invoice_number", "owner": "invoice", "type": "invoice_number", "label": "No." },
+      { "id": "line_items", "owner": "invoice", "type": "line_items", "label": "Items", "columns": [
+        { "id": "description", "owner": "line", "type": "text", "label": "Product name" },
+        { "id": "line_total", "owner": "line_computed", "type": "computed", "label": "Amount", "format": "currency" } ] },
+      { "id": "company_upi_id", "owner": "company", "type": "upi_id", "label": "UPI ID" } ] }
+  ],
   "root": {
     "type": "box",
     "style": {},
+    "section": "main",
     "children": [
       { "type": "text", "style": { "color": "#123456", "fontSize": 15 },
-        "spans": [ { "value": { "kind": "bind", "path": "invoice.number", "format": "text", "fallback": "" } } ] },
+        "spans": [ { "value": { "kind": "bind", "path": "invoice_number", "format": "text", "fallback": "" } } ] },
       { "type": "table", "style": {}, "columns": [ { "width": "auto" }, { "width": "auto" } ],
         "header": [],
         "body": {
-          "repeat": { "path": "items", "as": "item" },
+          "repeat": { "path": "line_items", "as": "item" },
           "row": { "type": "row", "style": {}, "cells": [
             { "type": "cell", "style": {}, "colSpan": 1, "children": [
               { "type": "text", "style": {}, "spans": [ { "value": { "kind": "bind", "path": "item.description", "format": "text", "fallback": "" } } ] } ] },
             { "type": "cell", "style": {}, "colSpan": 1, "children": [
-              { "type": "text", "style": {}, "spans": [ { "value": { "kind": "bind", "path": "item.amount", "format": "currency", "fallback": "" } } ] } ] }
+              { "type": "text", "style": {}, "spans": [ { "value": { "kind": "bind", "path": "item.line_total", "format": "currency", "fallback": "" } } ] } ] }
           ] }
         },
         "footer": []
       },
-      { "type": "conditional", "path": "payment.upi", "child": {
+      { "type": "conditional", "path": "company_upi_id", "child": {
           "type": "text", "style": {}, "spans": [
             { "value": { "kind": "literal", "text": "Pay: " } },
-            { "value": { "kind": "bind", "path": "payment.upi", "format": "text", "fallback": "" } } ] } }
+            { "value": { "kind": "bind", "path": "company_upi_id", "format": "text", "fallback": "" } } ] } }
     ]
   }
 }
 ```
 
 Note `40px → 30pt` (× 0.75), `20px → 15pt`, `#123456` kept as hex, and `color`/`fontSize` inherited
-onto the `h1` text node. The renderer just draws this — no CSS knowledge required.
+onto the `h1` text node. `description` inherited its type and label from the product form, and
+`company_upi_id` from the business-profile form. The renderer just draws this — no CSS knowledge
+required.

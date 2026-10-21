@@ -6,7 +6,8 @@
  *   2. deterministic (two compiles produce the same checksum),
  *   3. fully themed — every DRAWN element in a theme token's colour maps that style key to the token,
  *      so a user's colour override never leaves a stray element/run in the old colour (the APP-004/006
- *      lesson). Also prints the theme/sections(+edits)/customisation the tree exposes.
+ *      lesson). Also prints the theme, the sections (with the fields each one edits) and the
+ *      customisation the tree exposes.
  *
  * Usage: npx ts-node src/scripts/verifyTemplate.ts <html-file> <css-file>
  * Exit 0 = PASS (safe to publish); non-zero = do not publish.
@@ -82,7 +83,13 @@ if (stragglers > 0) {
 
 console.log(`checksum:      ${a.checksum.slice(0, 16)}…   (${JSON.stringify(compiled).length} bytes, deterministic=${a.checksum === b.checksum})`);
 console.log(`theme.tokens:  ${JSON.stringify(compiled.theme?.tokens ?? null)}`);
-console.log(`sections:      ${JSON.stringify((compiled.sections ?? []).map((s: any) => `${s.id}->${s.edits ?? "none"}`))}`);
+console.log("sections:");
+for (const s of compiled.sections ?? []) {
+  const fields = (s.fields ?? []).map((f: any) =>
+    `${f.id ?? "(info)"}:${f.type}${f.remember ? "*" : ""}${f.columns ? `[${f.columns.map((c: any) => c.id).join(",")}]` : ""}`);
+  console.log(`  ${s.id.padEnd(12)} "${s.label}"${s.hidable ? " (hidable)" : ""} -> ${fields.join(" ") || "(no fields)"}`);
+}
+console.log("               (* = remembered on the device)");
 console.log(`customisation: ${JSON.stringify((compiled.customisation ?? []).map((x: any) => x.type + (x.token ? `:${x.token}` : x.section ? `:${x.section}` : "")))}`);
 console.log(`colour stragglers: ${stragglers}`);
 

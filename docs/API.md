@@ -106,7 +106,8 @@ Authorization: Bearer <jwt>    # when signed in — enables per-user overrides
     "update": { "minSupportedBuild": 0, "recommendedBuild": 0, "androidStoreUrl": null,
                 "iosStoreUrl": null, "message": null },
     "maintenance": { "enabled": false, "message": null },
-    "limits": { "maxMediaBytes": 8388608, "maxSyncBatchInvoices": 500, "maxPageSize": 100 },
+    "limits": { "maxMediaBytes": 8388608, "maxSyncBatchInvoices": 500, "maxPageSize": 100,
+                "maxValuesBytes": 65536, "maxLineValuesBytes": 8192, "maxLineItems": 500 },
     "links": { "privacyPolicy": "https://billanta.ferbotz.com/privacy",
                "terms": "https://billanta.ferbotz.com/terms",
                "deleteAccount": "https://billanta.ferbotz.com/delete-account",
@@ -125,8 +126,51 @@ Authorization: Bearer <jwt>    # when signed in — enables per-user overrides
   `0` = no requirement, and an unknown build is never blocked.
 - `features.*` gate **UI entry points only**; the API routes keep working.
 - `limits.*` mirror what the server enforces (`POST /media` 8 MB, ≤ 500 invoices per sync push,
-  `?limit` ≤ 100) — check them before calling, don't retype them.
+  `?limit` ≤ 100, a record's `values` ≤ 64 KB, a line's ≤ 8 KB, ≤ 500 lines per invoice) — check
+  them before calling, don't retype them.
 - `links.*` are absolute: use them instead of hard-coding the host.
+
+---
+
+## Forms (public)
+
+### `GET /forms`
+The global **business profile, customer, product and settings** forms. The app builds those four
+screens entirely from this document, so a new field there needs no app release. Public, no auth (the
+forms are needed offline and before sign-in). Sends an `ETag`; repeat with `If-None-Match` → `304`.
+
+```json
+// 200 — Cache-Control: public, no-cache
+{ "success": true, "data": {
+  "schemaVersion": 1,
+  "optionLists": { "indian_states": [ { "value": "29", "label": "Karnataka" }, … ] },
+  "forms": {
+    "company":  { "sections": [ { "id": "business", "label": "Business details", "fields": [ … ] }, … ] },
+    "customer": { "sections": [ … ] },
+    "product":  { "sections": [ … ] },
+    "settings": { "sections": [ … ] }
+  }
+} }
+```
+
+Each field is a fully-resolved field definition. The fields, types, value formats and the rules for
+saving them are [`FIELDS.md`](FIELDS.md) — the reference for everything in a `values` map below.
+
+## Values maps — how records are stored
+
+Company, settings, customer, product and invoice data travel as a **`values` map: field id → value**
+([`FIELDS.md`](FIELDS.md) §7). The rules shared by every endpoint below:
+
+- Keys are registered field ids whose owner the record accepts. An unknown key is a `400`, never
+  silently dropped.
+- Values are strings, `true`/`false`, objects (an image `{ "url", "thumbnailUrl" }`, a discount
+  `{ "kind", "value", "beforeTax" }`) or `null`. **Numbers are decimal strings** (`"18"`, `"2.5"`);
+  money is integer paise as a string (`"150000"`).
+- The server checks shape and size only, plus the money inputs (quantity, unit price, tax rate,
+  discount, currency) and the state codes, which it calculates with. It **never rejects a format**
+  — a GSTIN with a bad checksum is stored as typed.
+- `""` and `null` mean empty: dropped on a full replace, "clear this key" on a `PATCH`.
+- `POST`/`PUT` replace the whole map; `PATCH` merges (absent key → unchanged, `null` → cleared).
 
 ---
 
@@ -172,176 +216,153 @@ Revokes the presented refresh token. Always `200` (silent about unknown tokens).
 
 ## Company (auth)
 
-- `GET /company` → the company object, or `data: null` if not set up yet.
-- `PUT /company` — **full replace**; `name` required, all other fields optional (omitting one
-  clears it). A valid `gstin` derives/validates `stateCode`. → the saved company.
+The business profile: `company_*` field id → value ([`FIELDS.md`](FIELDS.md) §3.3, §7.2).
 
-**The exact JSON body** — what `GET /company` returns and `PUT /company` accepts. ⚠️ These REST field
-names are the **wire contract**. They are NOT the template binding-namespace leaves
-(`company.signature`, `company.accountNumber`, …) — the client assembles the render context *from*
-these, renaming several. Because `PUT` is a full replace, sending a key the server doesn't recognise
-**silently clears that field** (it reads as omitted). A fully-populated profile:
+- `GET /company` → `{ "values": { … }, "createdAt", "updatedAt" }`, or `data: null` if not set up.
+- `PUT /company { "values": { … } }` — **full replace** (an omitted field is cleared). → the profile.
+- `PATCH /company { "values": { … } }` — **merge**: `null` clears a key, an absent key is untouched.
+  With no profile yet it creates one — an invoice can write a company field back before the profile
+  screen was ever opened. → the profile.
 
 ```json
-{
-  "id": "b1f2c3d4-…",
-  "name": "Ferbotz Innovations Private Limited",
-  "logoUrl": "https://cdn.example/logo.webp",
-  "logoThumbnailUrl": "https://cdn.example/logo-thumb.webp",
-  "gstin": "29ABCDE1234F1Z5",
-  "stateCode": "29",
-  "addressLine1": "1 MG Road",
-  "addressLine2": "Indiranagar",
-  "city": "Bengaluru",
-  "state": "Karnataka",
-  "pincode": "560038",
-  "country": "India",
-  "phone": "+91 98765 43210",
-  "email": "hello@ferbotz.com",
-  "signatureUrl": "https://cdn.example/sign.webp",
-  "signatoryName": "Vishal B",
-  "signatoryDesignation": "Director",
-  "upiId": "ferbotz@okhdfc",
-  "qrImageUrl": "https://cdn.example/qr.webp",
-  "bankName": "HDFC Bank",
-  "bankAccountNumber": "50100123456789",
-  "bankIfsc": "HDFC0001234",
-  "createdAt": "2026-08-19T09:00:00.000Z",
-  "updatedAt": "2026-08-19T09:00:00.000Z"
-}
+// PUT /company
+{ "values": {
+  "company_name": "Ferbotz Innovations Private Limited",
+  "company_logo": { "url": "https://…/logo.webp", "thumbnailUrl": "https://…/logo_thumb.webp" },
+  "company_gstin": "29ABCDE1234F1Z5",
+  "company_state": "29",
+  "company_address_line1": "1 MG Road",
+  "company_city": "Bengaluru",
+  "company_bank_name": "HDFC Bank",
+  "company_bank_account_number": "50100123456789",
+  "company_bank_ifsc": "HDFC0001234",
+  "company_upi_id": "ferbotz@okhdfc",
+  "company_signature": { "url": "https://…/sign.webp", "thumbnailUrl": "https://…/sign_thumb.webp" },
+  "company_signatory_name": "Vishal B"
+} }
 ```
 
-`id`, `createdAt`, `updatedAt` are server-set (present in responses, ignored on `PUT`). Every field
-except `name` is optional; `country` defaults to `"India"`. String fields are length-capped
-(`name`≤200, addresses≤300, `phone`≤40, `bankAccountNumber`≤60, `signatoryName`/`signatoryDesignation`≤120,
-url fields≤1000) — an over-long value is a `400`.
-
-**REST field ⇄ template binding path** — the confusable ones (names differ on purpose; a mismatch is
-the APP-011 data-loss class):
-
-| `/company` REST field | template binding path(s) |
-| --- | --- |
-| `logoUrl` | `company.logo` |
-| `signatureUrl` | `company.signature`, `signature.url` |
-| `signatoryName` | `signature.name` |
-| `signatoryDesignation` | `signature.designation` |
-| `qrImageUrl` | `company.qr`, `payment.qr` |
-| `bankAccountNumber` | `company.accountNumber`, `payment.accountNumber` |
-| `bankIfsc` | `company.ifsc`, `payment.ifsc` |
-| `upiId` | `company.upiId`, `payment.upi` |
-| `bankName` | `company.bankName`, `payment.bankName` |
+Nothing is required — a profile may be empty. `company_state` must be a code from the
+`indian_states` list (it decides CGST+SGST vs IGST); any other key just has to be a `company_*` id.
 
 ## Settings (auth)
 
-- `GET /settings` → the user's settings (auto-created with defaults on first call).
-- `PUT /settings` — **merge** (only sent fields change): `defaultCurrency`, `defaultTaxPercent`
-  (string, 0–100), `invoiceNumberPrefix`, `nextInvoiceNumber` (int ≥ 1), `defaultTemplateId`,
-  `defaultNotes`. → the updated settings.
+`settings_*` field id → value — the defaults that pre-fill a new invoice.
+
+- `GET /settings` → `{ "values", "createdAt", "updatedAt" }`. Created on first read with the
+  settings form's defaults: `settings_invoice_prefix: "INV-"`, `settings_next_invoice_number: "1"`,
+  `settings_default_currency: "INR"`.
+- `PUT /settings { "values" }` replaces the whole map — including the running invoice number, so a
+  client changing one setting should `PATCH`.
+- `PATCH /settings { "values" }` merges.
 
 ## Customers (auth)
 
+`customer_*` field id → value. Client-generated ids, idempotent by `(userId, id)`.
+
 ```json
-// POST /customers  (201) — client may supply "id" (uuid); idempotent by (userId,id)
-{ "id": "uuid?", "name": "Bob Buyer", "phone": "98765…", "email": "…", "gstin": "27…",
-  "addressLine1": "…", "city": "…", "state": "…", "stateCode": "27", "pincode": "…", "country": "India" }
+// POST /customers  (201) — create, or full replace on a repeated id
+{ "id": "uuid?",
+  "values": { "customer_name": "Bob Buyer", "customer_phone": "98765…", "customer_gstin": "27…",
+              "customer_state": "27", "customer_address_line1": "…", "customer_city": "Pune" } }
+// 201 — data
+{ "id": "uuid", "values": { … }, "createdAt": "…", "updatedAt": "…" }
 ```
-- `GET /customers?q=&limit=&cursor=` — `q` matches name/phone. → `{ items, nextCursor, hasMore }`.
-- `GET /customers/:id` · `PATCH /customers/:id` (partial) · `DELETE /customers/:id` (hard delete).
-  A foreign/missing id → `404`; a colliding id owned by someone else → `409`.
+- `GET /customers?q=&limit=&cursor=` — `q` matches name, phone or GSTIN. → `{ items, nextCursor, hasMore }`.
+- `GET /customers/:id` · `PATCH /customers/:id { "values" }` (merge) · `DELETE /customers/:id` (hard
+  delete). A foreign/missing id → `404`; a colliding id owned by someone else → `409`.
+- An invoice editor that edits a customer field writes it back with `PATCH`; a customer typed into an
+  invoice with none picked is created with `POST` ([`FIELDS.md`](FIELDS.md) §8.4).
 
 ## Products (auth)
 
-A reusable catalogue of line items, so a description/rate/tax needn't be retyped. **Same shape and
-rules as Customers** (client uuid `id`, idempotent by `(userId, id)`; a foreign/missing id → `404`,
-a colliding id owned by someone else → `409`). Money is paise strings, as everywhere. There is
-deliberately **no** `/products/sync` and **no** server-side dedup — the client replays per row and
-decides what "the same product" is (matching on a normalised name and reusing the id).
+A reusable catalogue of line items. Its values use the **line-item ids** (`description`, `image`,
+`hsn_sac`, `unit`, `unit_price`, `tax_rate` — never `quantity`), so picking a product copies its values
+straight into a line; editing the line never writes back. **Same shape and rules as Customers**
+(client uuid `id`, idempotent by `(userId, id)`; foreign/missing → `404`, a colliding id → `409`).
+There is deliberately **no** `/products/sync` and **no** server-side dedup — the client replays per
+row and decides what "the same product" is.
 
 ```json
-// POST /products  (201) — client may supply "id" (uuid); idempotent by (userId,id)
-{ "id": "uuid?", "name": "Design hour", "hsnSac": "998314",
-  "unitPrice": "150000", "taxRatePercent": "18", "unit": "hour",
-  "imageUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>.webp",
-  "imageThumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>_thumb.webp" }
+// POST /products  (201)
+{ "id": "uuid?",
+  "values": { "description": "Design hour", "hsn_sac": "998314", "unit": "hour",
+              "unit_price": "150000", "tax_rate": "18",
+              "image": { "url": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>.webp",
+                         "thumbnailUrl": "https://billanta-media.s3.ap-south-1.amazonaws.com/media/<userId>/<uuid>_thumb.webp" } } }
 ```
-
-| field | type | notes |
-| --- | --- | --- |
-| `name` | string, required | what the app puts in the line item's description |
-| `hsnSac` | string? | |
-| `unitPrice` | string | **paise** (integer as a string); absent/null → `"0"` |
-| `taxRatePercent` | string | decimal string, e.g. `"18"`; absent/null → `"0"` |
-| `unit` | string? | free text — "hour", "page", "piece". Display only |
-| `imageUrl` | string? | the photo: the `url` from `POST /media` (≤1280 px WebP) |
-| `imageThumbnailUrl` | string? | the `thumbnailUrl` from the same upload (≤512 px WebP); what a grid shows |
-| `createdAt` / `updatedAt` | ISO-8601 | **server-stamped** (last write to reach the server wins, as with Customers) |
-
-- `GET /products?q=&limit=&cursor=` — `q` matches `name`. → `{ items, nextCursor, hasMore }`.
-- `GET /products/:id` · `PATCH /products/:id` (partial) · `DELETE /products/:id` (**hard** delete).
-
-**Write semantics.** `POST` with a repeated id is a **full replace**: an omitted optional field is
-stored as `null`, the photo included, so a `POST` without `imageUrl`/`imageThumbnailUrl` removes the
-photo. `PATCH` is partial: an absent key leaves that field alone, and an explicit `null` (or `""`)
-clears it. Unknown keys are **ignored**, never rejected. On `POST`, though, a misspelt known key
-reads as omitted and clears that field.
-
-**The photo (APP-015).** Upload the image with `POST /media`, then send its `url` / `thumbnailUrl` as
-`imageUrl` / `imageThumbnailUrl`. They are two independent fields; the app sends them together.
-- **Validation:** each must be an absolute **`https:`** URL of at most **1000** characters, stored
-  exactly as sent (trimmed). Anything else is a `400` and leaves the row untouched. That includes a
-  device-local `file://` or `content://` URI, which no other device could load.
-- **Any https host is accepted,** not only our bucket. That way a URL the server once returned
-  always replays cleanly, even if the storage origin changes.
-- **Responses always carry both keys**, `null` when unset.
-- **`DELETE /products/:id` removes the row only.** The photo's S3 objects stay, like a replaced
-  logo, because one upload can back several rows. They are removed when the account is deleted by
-  email, or when the user asks support. `DELETE /users/me` does not remove uploads either.
+- `GET /products?q=&limit=&cursor=` — `q` matches the description. → `{ items, nextCursor, hasMore }`.
+- `GET /products/:id` · `PATCH /products/:id { "values" }` (merge) · `DELETE /products/:id` (**hard**
+  delete).
+- `unit_price` is paise as a string and `tax_rate` 0–100: both are validated strictly (they're money
+  inputs). `updatedAt` is server-stamped (last write to reach the server wins).
+- **The photo** is the `{ url, thumbnailUrl }` `POST /media` returned. Each URL must be an absolute
+  `https:` URL of at most 1000 characters — a device-local `file://` or `content://` URI is a `400`.
+  Any https host is accepted, so a URL the server once returned always replays. **`DELETE` removes the
+  row only**: the photo's S3 objects stay (one upload can back several rows, and invoices copy it).
 
 ---
 
 ## Invoices (auth)
 
-Money fields are recomputed server-side from `items`; any totals you send are ignored and the
-server's values are returned so the client can correct itself.
+An invoice is its `values` (its own fields **plus a copy of the company and customer values it
+prints**), its `lineItems`, and a few top-level fields. Totals are recomputed server-side from the
+lines; any totals you send are ignored and the server's are returned so the client can correct itself.
 
 ### `POST /invoices` (201) — create or idempotently replace
 ```json
 {
-  "id": "uuid?",                          // client-generated; re-POST replaces
-  "invoiceNumber": "INV-1", "invoiceDate": "2026-07-25T00:00:00Z", "dueDate": null,
-  "currency": "INR", "status": "Draft",   // Draft | Pending | Paid
-  "templateId": "classic", "templateVersion": 1,
-  "customerId": "uuid?",
-  "customerSnapshot": { "name": "Bob", "stateCode": "27", ... },   // ≤ 8KB JSON
-  "companySnapshot":  { "name": "Acme", "stateCode": "27", ... },
-  "notes": "…",
-  "themeOverrides": { "accent": "#c2410c" },   // optional: token name -> hex. null/omit = template defaults
-  "hiddenSections": ["signature", "terms"],     // optional: section ids to hide. null/omit = template defaults
-  "discountType": "Percentage",           // Flat | Percentage | (omit for none)
-  "discountValue": "10",                   // percent, or paise for Flat
-  "discountBeforeTax": true,
-  "items": [
-    { "description": "Widget", "quantity": "1", "unitPrice": "1000", "taxRatePercent": "18" },
-    { "description": "Gadget", "quantity": "2", "unitPrice": "2000", "taxRatePercent": "18" }
-  ]
+  "id": "uuid?",                            // client-generated; re-POST replaces
+  "templateId": "classic", "templateVersion": 2,
+  "status": "Draft",                        // Draft | Pending | Paid
+  "values": {
+    "customer": "6f1c…",                    // the picked customer's id
+    "invoice_number": "INV-1", "invoice_date": "2026-07-25", "due_date": "2026-08-09",
+    "currency": "INR", "po_number": "PO-7781", "notes": "…",
+    "discount": { "kind": "percent", "value": "10", "beforeTax": true },
+    "company_name": "Acme", "company_state": "27",
+    "customer_name": "Bob", "customer_phone": "98765…", "customer_state": "27"
+  },
+  "lineItems": [
+    { "id": "uuid?", "values": { "description": "Widget", "quantity": "1", "unit_price": "1000", "tax_rate": "18" } },
+    { "id": "uuid?", "values": { "description": "Gadget", "quantity": "2", "unit_price": "2000", "tax_rate": "18" } }
+  ],
+  "themeOverrides": { "accent": "#c2410c" },  // optional: token name -> hex. null/omit = template defaults
+  "hiddenSections": ["signature", "terms"],    // optional: section ids to hide. null/omit = template defaults
+  "pdfPath": null,                             // optional; omitted = left as stored
+  "updatedAt": "2026-07-25T10:00:00.000Z"      // the client's edit time (last-write-wins key)
 }
 ```
-Response `data` echoes the invoice with **server-computed** `subtotal`, `discountTotal`, `taxTotal`,
-`grandTotal` (paise strings), per-item `taxAmount`/`lineTotal`, and a derived
-`gstSplit: { intraState, cgst, sgst, igst }`. `409` if the `invoiceNumber` is already used or the id
-belongs to another user. `themeOverrides` (object) and `hiddenSections` (array of strings) are
-stored and echoed back **verbatim** — opaque to the server (validated only as object / string-array
-with a small size cap); a missing value means "template defaults". Both are also accepted on
-`/invoices/sync` and returned in `changed`.
+- `values` accepts `invoice`-, `company`- and `customer`-owned ids; `line_items` is never a value.
+  Line `values` accept the line ids. Line order is array order; a line without an `id` gets one.
+- **Money inputs are strict** (a `400`, or a sync conflict): `quantity` a non-negative decimal,
+  `unit_price` whole paise, `tax_rate` 0–100, `discount` `{ kind: "flat"|"percent", value, beforeTax? }`
+  (a flat value is paise; a percent 0–100), `currency` an ISO code, the two state codes from
+  `indian_states`. A **missing** one counts as 0 / no discount / INR / IGST, so an empty draft saves.
+
+Response `data`:
+```json
+{ "id", "templateId", "templateVersion", "status", "values": { … },
+  "lineItems": [ { "id", "values": { … }, "computed": { "line_total": "1000", "tax_amount": "162" } }, … ],
+  "computed": { "subtotal": "5000", "discount_total": "500", "tax_total": "810",
+                "cgst_total": "405", "sgst_total": "405", "igst_total": "0", "grand_total": "5310" },
+  "themeOverrides", "hiddenSections", "pdfPath", "deletedAt", "createdAt", "updatedAt" }
+```
+- `computed` is in paise strings. Tax splits into CGST + SGST when `company_state` equals
+  `customer_state`, otherwise (or when either is missing) into IGST.
+- `409` if a non-empty `invoice_number` is already used by another of the user's live invoices
+  (an empty number never clashes; deleting an invoice releases its number), or if the id belongs to
+  another user.
+- `themeOverrides` (object) and `hiddenSections` (array of strings) are stored and echoed back
+  **verbatim** — opaque to the server (validated only as object / string-array with a small size cap).
 
 ### List / read / patch / delete
-- `GET /invoices?limit=&cursor=&status=&q=` — `status` filters (Draft/Pending/Paid); `q` matches
-  invoice number and the snapshot customer name/phone. Excludes soft-deleted. →
-  `{ items, nextCursor, hasMore }`.
+- `GET /invoices?limit=&cursor=&status=&q=` — `status` filters (Draft/Pending/Paid); `q` matches the
+  invoice number and the customer name/phone. Excludes soft-deleted. → `{ items, nextCursor, hasMore }`.
 - `GET /invoices/:id` → the invoice (404 if deleted/foreign/missing).
-- `PATCH /invoices/:id` — quick scalar edits only: `status`, `notes`, `dueDate`, `pdfPath`,
-  `invoiceDate`, `invoiceNumber`, `currency`. (To change items/discount, re-POST the whole
-  invoice.) → the updated invoice.
+- `PATCH /invoices/:id` — `{ "status"?, "pdfPath"?, "values"?, "updatedAt"? }`. `values` **merges**
+  (`null` clears a key) and the invoice is recomputed, so a patched discount moves the totals. Lines
+  change only through a full `POST`. `"status": null` is ignored, never a downgrade. → the invoice.
 - `DELETE /invoices/:id` — **soft delete** (tombstone). Idempotent (a repeat returns `200`).
   Accepts an **optional** JSON body `{ "updatedAt": "<ISO-8601>" }` — the client's delete time, which
   becomes the tombstone's `updatedAt` (kept **monotonic**: never set below the row's current value).
@@ -375,7 +396,7 @@ with a small size cap); a missing value means "template defaults". Both are also
   one page with `nextCursor: null`.
   - **`thumbnailUrl`** (APP-012) — a picture of the template, rendered by the server at publish time:
     page 1 of the current version exactly as an **exported** invoice looks (no `editorOnly` nodes), in
-    its **default theme**, filled with one fixed, fictional sample invoice (every binding populated;
+    its **default theme**, filled with one fixed, fictional sample invoice (every field populated;
     `INV-0042`, fixed dates) so the thumbnails compare side by side. **WebP, 640 px wide** at the
     page's own aspect ratio (A4 → 640×906), edge to edge, **opaque white** — no alpha, frame or
     shadow. ~20–30 KB.
