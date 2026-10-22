@@ -26,6 +26,7 @@ an `APP-nnn`.
 9. Talking to the API
 10. Edge cases
 11. Acceptance checklist
+12. Invoice list thumbnails (BE-023)
 
 ---
 
@@ -406,3 +407,96 @@ The app is done with BE-021 when:
       ordinary field value of an invoice.
 - [ ] An unknown field type with a `fallbackType` renders as that type; without one, it's hidden and
       its value survives a save and a sync.
+
+---
+
+## 12. Invoice list thumbnails (BE-023)
+
+The invoice list shows each invoice as a **picture of its page 1**, with a dark overlay carrying the
+number, customer, amount, date and status, instead of a text-only row.
+
+**Decision (2026-10-22): the phone draws the thumbnails itself and never uploads them.** It uses the
+renderer it already has for the preview and the PDF. There is **no API change**:
+- `GET /invoices` and `/invoices/sync` already carry everything a card shows;
+- thumbnails never leave the phone, so the legal pages don't change either.
+
+### 12.1 What's drawn
+
+- Page 1 of the invoice, exactly as an **export** looks: `editorOnly` nodes dropped,
+  `hiddenSections` and `themeOverrides` applied.
+- Drawn with the same renderer as the preview and PDF, at about **360 px wide**.
+- Saved as WebP (or JPEG at quality ~80), roughly 15–30 KB each.
+
+### 12.2 The cache
+
+- **Where:** the app's cache directory, **one folder per signed-in account**, plus one for
+  signed-out use.
+- **Signing out keeps the folder.** Signing back in to the same account finds every thumbnail again:
+  **zero redraws**.
+- **Switching accounts:** when a *different* account signs in, delete the previous account's folder,
+  so one person's invoices never sit on the phone under another account.
+- **Key:** each image is filed under `invoiceId` + a **fingerprint** of everything that changes the
+  picture:
+  - the invoice's `values` and its lines' `values`, in order;
+  - `templateId`, `templateVersion`, `themeOverrides` and `hiddenSections`;
+  - a `RENDERER_VERSION` constant that the app bumps whenever its rendering changes.
+- **One image per invoice:** keep only the current one, and delete the old file when a new one is
+  written.
+- **Deleted invoices:** when one is deleted (or arrives as a tombstone), delete its thumbnail.
+- **Drafts redraw themselves:** a Draft's company and customer copy follows the live profile and
+  customer (§7.2), so editing the profile changes its fingerprint and it's redrawn. Issued invoices
+  are frozen, so their thumbnails stay put.
+- **It's only a cache:** the OS may clear it at any time, and everything regenerates (§12.3).
+
+### 12.3 When to draw
+
+1. **After a save:** about a second after the editor closes, or after a change is saved without the
+   editor (a status change, a sync pull that changed the invoice). Draw in the background.
+2. **When a row needs one:** when a row scrolls into view and no cached image matches its
+   fingerprint, queue it.
+   - The queue draws **visible rows first**, one or two at a time, at low priority.
+   - It drops a job whose row has scrolled away, and pauses while the editor is open.
+   - It never blocks scrolling.
+   - If the row's compiled template isn't cached yet (offline), leave the placeholder and retry once
+     the template downloads.
+
+**After a reinstall or on a new phone,** this means only the rows on screen are drawn, about 6–8, and
+the rest only if the user scrolls to them. A history of 10 or 1,000 invoices costs the same first
+screen.
+
+**Measure it:** time one thumbnail on a low-end phone. If it takes more than about **300 ms**, raise
+an `APP-nnn` with the numbers. The backend would then add a server-side copy of issued invoices'
+thumbnails, uploaded once when they freeze, for new phones to download instead of drawing. That was
+considered and deliberately left out of v1, because it needs private storage, an upload endpoint and
+a privacy-policy change.
+
+### 12.4 The list card
+
+- **Image:** the thumbnail fills the card, anchored to the top of the page; showing the top ~60% of
+  page 1 reads well.
+- **Overlay:** a bottom gradient (transparent → about 70% black) carrying, from the invoice record
+  the list already has:
+
+  | Shows | From |
+  | --- | --- |
+  | Invoice number | `values.invoice_number` ("Draft" when empty) |
+  | Customer | `values.customer_name` ("No customer" when empty) |
+  | Amount | `computed.grand_total`, formatted in `values.currency` |
+  | Date | `values.invoice_date` |
+  | Status chip | `status` (Draft / Pending / Paid) |
+
+- **Placeholder:** while the image is missing, show a neutral grey card with the **overlay already
+  filled in**. The image fades in when ready, so the list is readable instantly, even offline on a
+  brand-new install.
+
+### 12.5 Acceptance checklist
+
+- [ ] Sign out, then back in to the same account: every thumbnail shows with **no** drawing.
+- [ ] Sign in to a different account: the previous account's thumbnails are deleted from the phone.
+- [ ] Edit an invoice and close the editor: its thumbnail updates within a couple of seconds.
+- [ ] Change the business profile: Draft thumbnails redraw; Pending and Paid ones don't.
+- [ ] Fresh install, sign in with 50+ synced invoices: the overlays show at once, the first screen's
+      images fade in within about a second, scrolling draws the rest, and the list never stutters.
+- [ ] No thumbnail ever shows an editor-only placeholder, a hidden section or an un-applied colour
+      override.
+- [ ] Nothing about thumbnails is ever sent to the server.
