@@ -1,0 +1,77 @@
+/* Cobalt — reproduction of the corporate blue bordered invoice.
+   Everything sits inside one ruled frame; internal dividers are per-section
+   bottom borders, and the items table draws its own cell grid.
+
+   BOX MODEL: the renderer treats `width` as content-box, so padding is added
+   ON TOP of a declared width. Any element carrying a % width therefore carries
+   NO padding — the padding lives on an inner wrapper instead. Two 50% cells
+   with 16pt padding each would otherwise overrun their row by 64pt and push
+   the right-hand cell past the frame. */
+.page { padding: 26pt; font-family: Lato; font-size: 9pt; color: #1a1a1a; line-height: 1.45; }
+.frame { border: 1pt solid #1a1a1a; min-height: 770pt; }
+
+/* ---- header --------------------------------------------------------- */
+.head { display: flex; justify-content: space-between; align-items: flex-start; padding: 18pt 16pt 16pt 16pt; border-bottom: 1pt solid #1a1a1a; }
+.co { width: 58%; }
+.coname { font-size: 15pt; font-weight: 700; margin-bottom: 4pt; }
+.coline { font-size: 8.5pt; color: #6f6f6f; }
+.title { font-size: 30pt; font-weight: 400; color: #1a3a8c; letter-spacing: 0.5pt; }
+
+/* ---- invoice meta + logo slot --------------------------------------- */
+.metarow { display: flex; border-bottom: 1pt solid #1a1a1a; }
+.metaleft { width: 50%; border-right: 1pt solid #1a1a1a; }
+.metaright { width: 50%; }
+.metapad { padding: 10pt 16pt 12pt 16pt; }
+.logo { width: 90pt; height: 44pt; }
+.mrow { display: flex; margin-bottom: 4pt; }
+.mk { width: 84pt; font-size: 9pt; color: #6f6f6f; }
+.mv { font-size: 9pt; font-weight: 700; }
+
+/* ---- bill to / ship to ---------------------------------------------- */
+.band { display: flex; background-color: #f2f2f2; border-bottom: 1pt solid #1a1a1a; }
+.bandcell { width: 50%; border-right: 1pt solid #1a1a1a; }
+.bandcell2 { border-right: 0; }
+.bandpad { padding: 7pt 16pt; font-size: 10.5pt; }
+.parties { display: flex; border-bottom: 1pt solid #1a1a1a; }
+.pcell { width: 50%; border-right: 1pt solid #1a1a1a; }
+.pcell2 { border-right: 0; }
+.partypad { padding: 11pt 16pt 14pt 16pt; }
+.cname { font-size: 10pt; font-weight: 700; margin-bottom: 1pt; }
+.cline { font-size: 8.5pt; color: #6f6f6f; }
+
+/* ---- items ----------------------------------------------------------- */
+.items { width: 100%; }
+.items th { background-color: #1a3a8c; color: #ffffff; font-size: 9pt; font-weight: 400; text-align: left; padding: 8pt 10pt; }
+.items th.num { text-align: right; }
+.items th.desc { width: 60%; }
+.items td { padding: 10pt; border-bottom: 1pt solid #1a1a1a; border-right: 1pt solid #1a1a1a; vertical-align: top; font-size: 9pt; }
+.items td.num { text-align: right; }
+.items td.amt { border-right: 0; }
+.iname { font-weight: 700; }
+.isub { color: #6f6f6f; font-size: 8pt; }
+.items tfoot td { border-bottom: 0; border-right: 0; padding: 9pt 10pt; }
+.ftblank { border-right: 0; }
+.ftlabel { font-weight: 700; }
+.ftvalue { border-left: 1pt solid #1a1a1a; }
+
+/* ---- notes / terms / payment + totals -------------------------------- */
+.lower { display: flex; border-top: 1pt solid #1a1a1a; }
+.lleft { width: 58%; }
+.lpad { padding: 14pt 16pt 22pt 16pt; }
+.lright { width: 42%; }
+.thanks { font-size: 9pt; color: #6f6f6f; margin-bottom: 16pt; }
+.blockhead { font-size: 10.5pt; margin-bottom: 3pt; }
+.terms { margin-bottom: 16pt; }
+.termstext { font-size: 8.5pt; color: #6f6f6f; line-height: 1.55; }
+.prow { display: flex; margin-bottom: 1.5pt; }
+.pk { width: 72pt; font-size: 8.5pt; color: #6f6f6f; }
+.pv { font-size: 8.5pt; }
+
+.totalbox { background-color: #aec8f2; padding: 12pt 16pt; }
+.trow { display: flex; justify-content: space-between; margin-bottom: 5pt; }
+.tk { font-size: 10pt; font-weight: 700; }
+.tv { font-size: 10pt; font-weight: 700; }
+
+/* ---- editor-only empty states (neutral grey, never a token colour) ---- */
+.empty { margin-top: 8pt; padding: 14pt; border: 1.5pt dashed #a8a8a8; border-radius: 5pt; text-align: center; }
+.emptylabel { color: #a8a8a8; font-size: 9pt; }

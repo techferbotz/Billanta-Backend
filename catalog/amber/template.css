@@ -1,0 +1,75 @@
+/* Amber — reproduction of the minimal yellow invoice.
+   Bands bleed to the page edge, so the root carries no padding and each
+   block sets its own horizontal gutter (34pt). */
+.page { padding: 0; font-family: Montserrat; font-size: 9pt; color: #23262e; line-height: 1.5; }
+
+/* ---- brand ---------------------------------------------------------- */
+.brandrow { display: flex; align-items: center; gap: 10pt; padding: 40pt 34pt 18pt 34pt; }
+.logo { width: 34pt; height: 34pt; }
+.bname { font-size: 17pt; font-weight: 700; }
+.btag { font-size: 6.5pt; font-weight: 600; letter-spacing: 1.6pt; text-transform: uppercase; color: #7c7f89; }
+
+/* ---- yellow band + INVOICE ------------------------------------------ */
+.band { display: flex; align-items: center; }
+.bandbar { flex: 1; background-color: #fec90b; }
+.bandcap { width: 46pt; background-color: #fec90b; }
+.shim { height: 32pt; }
+.bandtitle { padding: 0 16pt; font-size: 30pt; font-weight: 500; letter-spacing: 2.5pt; color: #23262e; }
+
+/* ---- invoice to / meta ---------------------------------------------- */
+.info { display: flex; justify-content: space-between; padding: 32pt 34pt 0 34pt; }
+.billto { width: 52%; }
+.tolabel { font-size: 12pt; font-weight: 600; margin-bottom: 4pt; }
+.toname { font-size: 11pt; font-weight: 700; }
+.toline { font-size: 8pt; color: #7c7f89; letter-spacing: 0.2pt; }
+.meta { width: 40%; }
+.mrow { display: flex; justify-content: space-between; margin-bottom: 3pt; }
+.mk { font-size: 10pt; font-weight: 700; }
+.mv { font-size: 9pt; color: #7c7f89; }
+
+/* ---- items ----------------------------------------------------------- */
+.itemsblock { padding: 28pt 34pt 0 34pt; }
+.itemsbox { border: 1pt solid #e4e4e6; min-height: 250pt; }
+.items { width: 100%; }
+.items th { background-color: #383a46; color: #ffffff; font-size: 8.5pt; font-weight: 700; text-align: left; padding: 9pt 10pt; }
+.items th.desc { width: 52%; }
+.items th.num { width: 18%; text-align: right; }
+.items th.qty { width: 12%; text-align: center; }
+.items td { padding: 12pt 10pt; border-bottom: 1pt solid #efefef; font-size: 9pt; font-weight: 600; }
+.items td.num { text-align: right; }
+.items td.qty { text-align: center; }
+
+/* ---- notes / terms / payment + totals -------------------------------- */
+.lower { display: flex; justify-content: space-between; gap: 20pt; padding: 28pt 34pt 0 34pt; }
+.lleft { width: 56%; }
+.lright { width: 38%; }
+.thanks { font-size: 10pt; font-weight: 600; margin-bottom: 14pt; }
+.blockhead { font-size: 9.5pt; font-weight: 700; margin-bottom: 4pt; }
+.terms { margin-bottom: 14pt; }
+.termstext { font-size: 7pt; color: #7c7f89; line-height: 1.6; }
+.prow { display: flex; margin-bottom: 1.5pt; }
+.pk { width: 66pt; font-size: 7pt; font-weight: 700; }
+.pv { font-size: 7pt; color: #7c7f89; }
+
+.trow { display: flex; justify-content: space-between; margin-bottom: 5pt; }
+.tk { font-size: 9pt; font-weight: 700; }
+.tv { font-size: 9pt; }
+.grand { display: flex; justify-content: space-between; background-color: #fec90b; padding: 9pt 12pt; margin-top: 8pt; }
+.gk { font-size: 11pt; font-weight: 700; }
+.gv { font-size: 11pt; font-weight: 700; }
+
+/* ---- footer ---------------------------------------------------------- */
+.footrow { display: flex; align-items: flex-end; margin-top: 30pt; }
+.frule { flex: 1; background-color: #fec90b; }
+.fcap { width: 46pt; background-color: #fec90b; }
+.footrow .shim { height: 3.5pt; }
+.sig { width: 140pt; padding: 0 10pt; text-align: center; }
+.sigimg { width: 62pt; height: 24pt; }
+.sigline { border-top: 1pt solid #b9bcc4; padding-top: 4pt; font-size: 8.5pt; font-weight: 700; }
+.contact { display: flex; gap: 10pt; padding: 13pt 34pt 34pt 34pt; }
+.citem { font-size: 8.5pt; font-weight: 700; }
+.csep { font-size: 8.5pt; color: #b9bcc4; }
+
+/* ---- editor-only empty states (neutral grey, never the accent) -------- */
+.empty { margin-top: 12pt; padding: 18pt; border: 1.5pt dashed #b9bcc4; border-radius: 6pt; text-align: center; }
+.emptylabel { color: #b9bcc4; font-size: 9pt; }

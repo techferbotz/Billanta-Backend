@@ -1,0 +1,133 @@
+<div class="page" data-page-size="A4"
+     data-section-order="header business parties items totals notes payment terms"
+     data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Brand colour","token":"accent"},{"type":"color","title":"Totals panel","token":"secondary"},{"type":"section","title":"Payment info","section":"payment"},{"type":"section","title":"Notes","section":"notes"},{"type":"section","title":"Terms","section":"terms"}]'>
+  <div class="frame">
+
+    <div class="head">
+      <div class="co" data-section="business" data-section-label="Your business" data-hidable="false"
+           data-fields='[{"id":"company_logo"},{"id":"company_name"},{"id":"company_address_line1"},{"id":"company_address_line2"},{"id":"company_city"},{"id":"company_state"},{"id":"company_pincode"},{"id":"company_gstin"}]'>
+        <div class="coname">{{ company_name }}</div>
+        <div class="coline" data-if="company_address_line1">{{ company_address_line1 }}</div>
+        <div class="coline" data-if="company_address_line2">{{ company_address_line2 }}</div>
+        <div class="coline" data-if="company_city">{{ company_city }} {{ company_state }} {{ company_pincode }}</div>
+        <div class="coline" data-if="company_gstin">GSTIN {{ company_gstin }}</div>
+      </div>
+      <div class="title" data-token="color:accent">INVOICE</div>
+    </div>
+
+    <div class="metarow" data-section="header" data-section-label="Invoice details" data-hidable="false"
+         data-fields='[{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Invoice date","default":{"kind":"today"}},{"id":"due_date","type":"due_date","label":"Due date","remember":true,"presets":[0,7,15,30,45],"default":{"kind":"setting","id":"settings_default_due_days"}}]'>
+      <div class="metaleft">
+        <div class="metapad">
+          <div class="mrow"><div class="mk">Invoice#</div><div class="mv">{{ invoice_number }}</div></div>
+          <div class="mrow"><div class="mk">Invoice Date</div><div class="mv">{{ invoice_date | date }}</div></div>
+          <div class="mrow" data-if="due_date"><div class="mk">Due Date</div><div class="mv">{{ due_date | date }}</div></div>
+        </div>
+      </div>
+      <div class="metaright" data-section="business">
+        <div class="metapad">
+          <img class="logo" src="{{ company_logo.url }}" data-if="company_logo" />
+        </div>
+      </div>
+    </div>
+
+    <div class="band">
+      <div class="bandcell"><div class="bandpad">Bill To</div></div>
+      <div class="bandcell bandcell2"><div class="bandpad">Ship To</div></div>
+    </div>
+
+    <div class="parties" data-section="parties" data-section-label="Bill to" data-hidable="false"
+         data-fields='[{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_address_line1"},{"id":"customer_address_line2"},{"id":"customer_city"},{"id":"customer_state"},{"id":"customer_pincode"},{"id":"customer_gstin"}]'>
+      <div class="pcell">
+        <div class="partypad">
+          <div class="cname" data-if="customer_name">{{ customer_name }}</div>
+          <div class="cline" data-if="customer_address_line1">{{ customer_address_line1 }}</div>
+          <div class="cline" data-if="customer_address_line2">{{ customer_address_line2 }}</div>
+          <div class="cline" data-if="customer_city">{{ customer_city }} {{ customer_state }} {{ customer_pincode }}</div>
+          <div class="cline" data-if="customer_gstin">GSTIN {{ customer_gstin }}</div>
+          <div class="empty" data-unless="customer_name" data-editor-only><div class="emptylabel">+ Add customer</div></div>
+        </div>
+      </div>
+      <div class="pcell pcell2">
+        <div class="partypad">
+          <div class="cline" data-if="customer_address_line1">{{ customer_address_line1 }}</div>
+          <div class="cline" data-if="customer_address_line2">{{ customer_address_line2 }}</div>
+          <div class="cline" data-if="customer_city">{{ customer_city }} {{ customer_state }} {{ customer_pincode }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="itemsblock" data-section="items" data-section-label="Items" data-hidable="false"
+         data-fields='[{"id":"line_items","label":"Items","columns":[{"id":"description","label":"Item &amp; description"},{"id":"hsn_sac"},{"id":"quantity","type":"number","label":"Qty","min":0,"default":{"kind":"value","value":"1"}},{"id":"unit_price","label":"Rate"},{"id":"tax_rate","label":"GST %","default":{"kind":"setting","id":"settings_default_tax_rate"}},{"id":"line_total","label":"Amount"}]}]'>
+      <table class="items" data-if="line_items">
+        <thead>
+          <tr>
+            <th class="desc" data-token="backgroundColor:accent">Item &amp; Description</th>
+            <th class="num" data-token="backgroundColor:accent">Qty</th>
+            <th class="num" data-token="backgroundColor:accent">Rate</th>
+            <th class="num amt" data-token="backgroundColor:accent">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-repeat="line_items as item">
+            <td class="desc">
+              <div class="iname">{{ item.description }}</div>
+              <div class="isub" data-if="item.hsn_sac">HSN/SAC {{ item.hsn_sac }}</div>
+            </td>
+            <td class="num">{{ item.quantity | number }}</td>
+            <td class="num">{{ item.unit_price | currency }}</td>
+            <td class="num amt">{{ item.line_total | currency }}</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2" class="ftblank"></td>
+            <td class="num ftlabel">Sub Total</td>
+            <td class="num amt ftvalue">{{ subtotal | currency }}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div class="empty" data-unless="line_items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+    </div>
+
+    <div class="lower">
+      <div class="lleft">
+        <div class="lpad">
+          <div class="thanks" data-section="notes" data-section-label="Notes"
+               data-fields='[{"id":"notes","type":"multiline","label":"Notes","placeholder":"Thanks for shopping with us.","default":{"kind":"setting","id":"settings_default_notes"}}]'>{{ notes ?? 'Thanks for shopping with us.' }}</div>
+
+          <div class="terms" data-section="terms" data-section-label="Terms &amp; conditions"
+               data-fields='[{"id":"terms","type":"multiline","label":"Terms &amp; conditions","remember":true,"default":{"kind":"setting","id":"settings_default_terms"}}]'>
+            <div class="blockhead">Terms &amp; Conditions</div>
+            <div class="termstext">{{ terms ?? 'Full payment is due upon receipt of this invoice. Late payments may incur additional charges or interest as per the applicable laws.' }}</div>
+          </div>
+
+          <div class="payinfo" data-section="payment" data-section-label="Payment details"
+               data-fields='[{"id":"company_bank_account_number"},{"id":"company_bank_account_name"},{"id":"company_bank_name"},{"id":"company_bank_ifsc"},{"id":"company_upi_id"}]'>
+            <div class="blockhead">Payment Details</div>
+            <div class="pwrap">
+              <div data-if="company_bank_account_number">
+                <div class="prow"><div class="pk">A/C Name</div><div class="pv" data-if="company_bank_account_name">{{ company_bank_account_name }}</div><div class="pv" data-unless="company_bank_account_name">{{ company_name }}</div></div>
+                <div class="prow"><div class="pk">A/C Number</div><div class="pv">{{ company_bank_account_number }}</div></div>
+                <div class="prow" data-if="company_bank_name"><div class="pk">Bank</div><div class="pv">{{ company_bank_name }} &middot; IFSC {{ company_bank_ifsc }}</div></div>
+              </div>
+              <div class="prow" data-if="company_upi_id"><div class="pk">UPI</div><div class="pv">{{ company_upi_id }}</div></div>
+            </div>
+            <div class="empty" data-unless="company_bank_account_number" data-editor-only><div class="emptylabel">+ Add payment details</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lright">
+        <div class="totalbox" data-section="totals" data-section-label="Total" data-hidable="false" data-token="backgroundColor:secondary"
+             data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total"}]'>
+          <div class="trow" data-if="discount_total"><div class="tk">Discount</div><div class="tv">{{ discount_total | currency }}</div></div>
+          <div class="trow"><div class="tk">Tax</div><div class="tv">{{ tax_total | currency }}</div></div>
+          <div class="trow"><div class="tk">Total</div><div class="tv">{{ grand_total | currency }}</div></div>
+          <div class="trow"><div class="tk">Balance Due</div><div class="tv">{{ grand_total | currency }}</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

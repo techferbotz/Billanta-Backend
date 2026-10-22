@@ -1,0 +1,94 @@
+<div class="page" data-page-size="A4" data-section-order="header business parties items totals payment signature">
+
+  <div class="hdr" data-section="business" data-section-label="Your business" data-hidable="false"
+       data-fields='[{"id":"company_name"},{"id":"company_address_line1"},{"id":"company_city"},{"id":"company_state"},{"id":"company_pincode"},{"id":"company_phone"},{"id":"company_gstin"},{"id":"company_email"}]'>
+    <div class="tax">TAX INVOICE</div>
+    <div class="cname" data-token="color:accent">{{ company_name }}</div>
+    <div class="caddr">{{ company_address_line1 }}</div>
+    <div class="caddr" data-if="company_city">{{ company_city }}, {{ company_state }} {{ company_pincode }}</div>
+    <div class="metaline">
+      <div data-if="company_phone"><strong>Mobile:</strong> {{ company_phone }}</div>
+      <div data-if="company_gstin"><strong>GSTIN:</strong> {{ company_gstin }}</div>
+    </div>
+    <div class="cmeta" data-if="company_email"><strong>Email:</strong> {{ company_email }}</div>
+    <div class="rule" data-token="backgroundColor:accent"></div>
+    <div class="metaband" data-section="header" data-section-label="Invoice details" data-hidable="false"
+         data-fields='[{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Invoice date","default":{"kind":"today"}}]'>
+      <div><strong>Invoice No.:</strong> {{ invoice_number }}</div>
+      <div class="right"><strong>Invoice Date:</strong> {{ invoice_date | date }}</div>
+    </div>
+  </div>
+
+  <div class="billto" data-section="parties" data-section-label="Bill to" data-hidable="false"
+       data-fields='[{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_address_line1"},{"id":"customer_city"},{"id":"customer_state"},{"id":"customer_pincode"},{"id":"customer_phone"},{"id":"customer_gstin"}]'>
+    <div data-if="customer_name">
+      <div class="label">BILL TO</div>
+      <div class="pname">{{ customer_name }}</div>
+      <div class="paddr">{{ customer_address_line1 }}</div>
+      <div class="paddr" data-if="customer_city">{{ customer_city }}, {{ customer_state }} {{ customer_pincode }}</div>
+      <div class="pline" data-if="customer_phone">Mobile: {{ customer_phone }}</div>
+      <div class="pline" data-if="customer_gstin">GSTIN: {{ customer_gstin }}</div>
+      <div class="pline" data-if="customer_state">Place of Supply: {{ customer_state }}</div>
+    </div>
+    <div class="empty" data-unless="customer_name" data-editor-only><div class="emptylabel">+ Add customer (Bill To)</div></div>
+  </div>
+  <div class="rule2" data-token="backgroundColor:accent"></div>
+
+  <div class="itemsblock" data-section="items" data-section-label="Services" data-hidable="false"
+       data-fields='[{"id":"line_items","label":"Services","columns":[{"id":"description","label":"Service"},{"id":"quantity","type":"number","label":"Qty","min":0,"default":{"kind":"value","value":"1"}},{"id":"unit_price","label":"Rate"},{"id":"tax_rate","label":"Tax %","default":{"kind":"setting","id":"settings_default_tax_rate"}},{"id":"line_total","label":"Amount"}]},{"id":"hide_gst_column","type":"boolean","label":"Hide the tax column","remember":true}]'>
+    <table class="items" data-if="line_items">
+      <thead>
+        <tr>
+          <th class="desc" data-token="borderBottomColor:accent">SERVICES</th>
+          <th class="num" data-token="borderBottomColor:accent">QTY.</th>
+          <th class="num" data-token="borderBottomColor:accent">RATE</th>
+          <th class="num" data-token="borderBottomColor:accent" data-unless="hide_gst_column">TAX</th>
+          <th class="num" data-token="borderBottomColor:accent">AMOUNT</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr data-repeat="line_items as item">
+          <td class="desc">{{ item.description }}</td>
+          <td class="num">{{ item.quantity | number }}</td>
+          <td class="num">{{ item.unit_price | currency }}</td>
+          <td class="num">{{ item.tax_rate | number }}%</td>
+          <td class="num">{{ item.line_total | currency }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="empty" data-unless="line_items" data-editor-only><div class="emptylabel">+ Add a service or item</div></div>
+  </div>
+
+  <div class="footer">
+    <div class="pay" data-section="payment" data-section-label="Bank details"
+         data-fields='[{"id":"company_bank_name"},{"id":"company_bank_account_name"},{"id":"company_bank_account_number"},{"id":"company_bank_ifsc"}]'>
+      <div data-if="company_bank_name">
+        <div class="label">BANK DETAILS</div>
+        <div class="bankrow" data-if="company_bank_account_name"><span class="bk">A/C Name:</span> {{ company_bank_account_name }}</div>
+        <div class="bankrow" data-unless="company_bank_account_name"><span class="bk">A/C Name:</span> {{ company_name }}</div>
+        <div class="bankrow" data-if="company_bank_ifsc"><span class="bk">IFSC Code:</span> {{ company_bank_ifsc }}</div>
+        <div class="bankrow" data-if="company_bank_account_number"><span class="bk">Account No:</span> {{ company_bank_account_number }}</div>
+        <div class="bankrow"><span class="bk">Bank:</span> {{ company_bank_name }}</div>
+      </div>
+      <div class="empty" data-unless="company_bank_name" data-editor-only><div class="emptylabel">+ Add bank details</div></div>
+    </div>
+    <div class="totalsblock" data-section="totals" data-section-label="Total" data-hidable="false"
+         data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total amount"}]'>
+      <div class="totalrow"><div>Taxable Amount</div><div>{{ subtotal | currency }}</div></div>
+      <div class="totalrow" data-if="discount_total"><div>Discount</div><div>{{ discount_total | currency }}</div></div>
+      <div class="totalrow"><div>Tax (GST)</div><div>{{ tax_total | currency }}</div></div>
+      <div class="grandrow" data-token="borderTopColor:accent borderBottomColor:accent"><div>Total Amount</div><div>{{ grand_total | currency }}</div></div>
+    </div>
+  </div>
+
+  <div class="sign" data-section="signature" data-section-label="Signature" data-if="company_signature"
+       data-fields='[{"id":"company_signature"},{"id":"company_signatory_name"},{"id":"company_signatory_designation"}]'>
+    <img class="signimg" src="{{ company_signature.url }}" />
+    <div class="signname" data-if="company_signatory_name">{{ company_signatory_name }}</div>
+    <div class="signrole" data-if="company_signatory_designation">{{ company_signatory_designation }}</div>
+    <div class="signlabel">AUTHORISED SIGNATORY FOR</div>
+    <div class="signco">{{ company_name }}</div>
+  </div>
+  <div class="empty" data-section="signature" data-unless="company_signature" data-editor-only><div class="emptylabel">+ Add a signature</div></div>
+
+</div>

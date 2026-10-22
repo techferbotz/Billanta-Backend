@@ -1,0 +1,120 @@
+<div class="page" data-page-size="A4"
+     data-section-order="header business parties items totals notes payment terms signature"
+     data-customisation='[{"type":"template","title":"Template"},{"type":"color","title":"Accent colour","token":"accent"},{"type":"color","title":"Table header","token":"secondary"},{"type":"section","title":"Payment info","section":"payment"},{"type":"section","title":"Notes","section":"notes"},{"type":"section","title":"Terms","section":"terms"},{"type":"section","title":"Signature","section":"signature"}]'>
+
+  <div class="brandrow" data-section="business" data-section-label="Your business" data-hidable="false"
+       data-fields='[{"id":"company_logo"},{"id":"company_name"},{"id":"company_gstin"},{"id":"company_phone"},{"id":"company_email"},{"id":"company_city"}]'>
+    <img class="logo" src="{{ company_logo.url }}" data-if="company_logo" />
+    <div class="brandtext">
+      <div class="bname">{{ company_name }}</div>
+      <div class="btag" data-if="company_gstin">GSTIN {{ company_gstin }}</div>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="bandbar" data-token="backgroundColor:accent"><div class="shim"></div></div>
+    <div class="bandtitle">INVOICE</div>
+    <div class="bandcap" data-token="backgroundColor:accent"><div class="shim"></div></div>
+  </div>
+
+  <div class="info">
+    <div class="billto" data-section="parties" data-section-label="Invoice to" data-hidable="false"
+         data-fields='[{"id":"customer","label":"Customer"},{"id":"customer_name"},{"id":"customer_address_line1"},{"id":"customer_address_line2"},{"id":"customer_city"},{"id":"customer_state"},{"id":"customer_pincode"},{"id":"customer_gstin"}]'>
+      <div class="tolabel">Invoice to:</div>
+      <div class="toname" data-if="customer_name">{{ customer_name }}</div>
+      <div class="toline" data-if="customer_address_line1">{{ customer_address_line1 }}</div>
+      <div class="toline" data-if="customer_address_line2">{{ customer_address_line2 }}</div>
+      <div class="toline" data-if="customer_city">{{ customer_city }} {{ customer_state }} {{ customer_pincode }}</div>
+      <div class="toline" data-if="customer_gstin">GSTIN {{ customer_gstin }}</div>
+      <div class="empty" data-unless="customer_name" data-editor-only><div class="emptylabel">+ Add customer</div></div>
+    </div>
+    <div class="meta" data-section="header" data-section-label="Invoice details" data-hidable="false"
+         data-fields='[{"id":"invoice_number","label":"Invoice number"},{"id":"invoice_date","label":"Date","default":{"kind":"today"}},{"id":"due_date","type":"due_date","label":"Due date","remember":true,"presets":[0,7,15,30,45],"default":{"kind":"setting","id":"settings_default_due_days"}}]'>
+      <div class="mrow"><div class="mk">Invoice#</div><div class="mv">{{ invoice_number }}</div></div>
+      <div class="mrow"><div class="mk">Date</div><div class="mv">{{ invoice_date | date }}</div></div>
+      <div class="mrow" data-if="due_date"><div class="mk">Due Date</div><div class="mv">{{ due_date | date }}</div></div>
+    </div>
+  </div>
+
+  <div class="itemsblock" data-section="items" data-section-label="Items" data-hidable="false"
+       data-fields='[{"id":"line_items","label":"Items","columns":[{"id":"description","label":"Item description"},{"id":"unit_price","label":"Price"},{"id":"quantity","type":"number","label":"Qty","min":0,"default":{"kind":"value","value":"1"}},{"id":"tax_rate","label":"GST %","default":{"kind":"setting","id":"settings_default_tax_rate"}},{"id":"line_total","label":"Total"}]}]'>
+    <div class="itemsbox" data-if="line_items">
+      <table class="items">
+        <thead>
+          <tr>
+            <th class="desc" data-token="backgroundColor:secondary">Item Description</th>
+            <th class="num" data-token="backgroundColor:secondary">Price</th>
+            <th class="qty" data-token="backgroundColor:secondary">Qty.</th>
+            <th class="num" data-token="backgroundColor:secondary">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-repeat="line_items as item">
+            <td class="desc">{{ item.description }}</td>
+            <td class="num">{{ item.unit_price | currency }}</td>
+            <td class="qty">{{ item.quantity | number }}</td>
+            <td class="num">{{ item.line_total | currency }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="empty" data-unless="line_items" data-editor-only><div class="emptylabel">+ Add an item</div></div>
+  </div>
+
+  <div class="lower">
+    <div class="lleft">
+      <div class="thanks" data-section="notes" data-section-label="Notes"
+           data-fields='[{"id":"notes","type":"multiline","label":"Notes","placeholder":"Thank you for your business","default":{"kind":"setting","id":"settings_default_notes"}}]'>{{ notes ?? 'Thank you for your business' }}</div>
+
+      <div class="terms" data-section="terms" data-section-label="Terms &amp; conditions"
+           data-fields='[{"id":"terms","type":"multiline","label":"Terms &amp; conditions","remember":true,"default":{"kind":"setting","id":"settings_default_terms"}}]'>
+        <div class="blockhead">Terms &amp; Conditions</div>
+        <div class="termstext">{{ terms ?? 'Payment is due within the agreed credit period. Goods once sold are not returnable or exchangeable. Interest at 18% per annum is chargeable on overdue amounts.' }}</div>
+      </div>
+
+      <div class="payinfo" data-section="payment" data-section-label="Payment details"
+           data-fields='[{"id":"company_bank_account_number"},{"id":"company_bank_account_name"},{"id":"company_bank_name"},{"id":"company_bank_ifsc"},{"id":"company_upi_id"}]'>
+        <div class="blockhead">Payment Info:</div>
+        <div class="pwrap">
+          <div data-if="company_bank_account_number">
+            <div class="prow"><div class="pk">Account #:</div><div class="pv">{{ company_bank_account_number }}</div></div>
+            <div class="prow"><div class="pk">A/C Name:</div><div class="pv" data-if="company_bank_account_name">{{ company_bank_account_name }}</div><div class="pv" data-unless="company_bank_account_name">{{ company_name }}</div></div>
+            <div class="prow" data-if="company_bank_name"><div class="pk">Bank Details:</div><div class="pv">{{ company_bank_name }} &middot; IFSC {{ company_bank_ifsc }}</div></div>
+          </div>
+          <div class="prow" data-if="company_upi_id"><div class="pk">UPI:</div><div class="pv">{{ company_upi_id }}</div></div>
+        </div>
+        <div class="empty" data-unless="company_bank_account_number" data-editor-only><div class="emptylabel">+ Add payment details</div></div>
+      </div>
+    </div>
+
+    <div class="lright" data-section="totals" data-section-label="Total" data-hidable="false"
+         data-fields='[{"id":"discount","label":"Discount"},{"id":"grand_total","label":"Total"}]'>
+      <div class="trow"><div class="tk">Sub Total:</div><div class="tv">{{ subtotal | currency }}</div></div>
+      <div class="trow" data-if="discount_total"><div class="tk">Discount:</div><div class="tv">{{ discount_total | currency }}</div></div>
+      <div class="trow"><div class="tk">Tax:</div><div class="tv">{{ tax_total | currency }}</div></div>
+      <div class="grand" data-token="backgroundColor:accent">
+        <div class="gk">Total:</div>
+        <div class="gv">{{ grand_total | currency }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footrow">
+    <div class="frule" data-token="backgroundColor:accent"><div class="shim"></div></div>
+    <div class="sig" data-section="signature" data-section-label="Signature"
+         data-fields='[{"id":"company_signature"},{"id":"company_signatory_name"}]'>
+      <img class="sigimg" src="{{ company_signature.url }}" data-if="company_signature" />
+      <div class="sigline">{{ company_signatory_name ?? 'Authorised Sign' }}</div>
+    </div>
+    <div class="fcap" data-token="backgroundColor:accent"><div class="shim"></div></div>
+  </div>
+
+  <div class="contact">
+    <div class="citem" data-if="company_phone">{{ company_phone }}</div>
+    <div class="csep" data-if="company_phone">|</div>
+    <div class="citem" data-if="company_city">{{ company_city }}</div>
+    <div class="csep" data-if="company_email">|</div>
+    <div class="citem" data-if="company_email">{{ company_email }}</div>
+  </div>
+
+</div>
