@@ -1,6 +1,6 @@
 # Server-driven fields: contract spec
 
-> **Status: approved and implemented (2026-10-21), not yet deployed.** This is the reference for field
+> **Status: live since 2026-10-22 (BE-021, deployed per BE-022).** This is the reference for field
 > ids, types, forms and values. [`TEMPLATE_JSON.md`](TEMPLATE_JSON.md),
 > [`TEMPLATE_AUTHORING.md`](TEMPLATE_AUTHORING.md) and [`API.md`](API.md) cover the same contract from
 > the renderer's, the designer's and the endpoint's side. The code is `src/fields/` (registry, types,
@@ -746,9 +746,9 @@ the product's values.
 
 ## 10. Rollout
 
-Backend steps 1–9 are done on branch `feat/server-driven-fields`, with every `check:*` script green.
-Step 6 is only half done: the seeds are rewritten, but Amber, Amethyst and Cobalt still need their
-sources fetched from production and rewritten. The production steps haven't run.
+**Done.** All backend steps shipped in `3c65776` and `90aa72c`, with every `check:*` script green.
+Amber, Amethyst and Cobalt were rewritten and are kept in `catalog/`. Production was wiped,
+migrated and republished on 2026-10-22 (BE-022).
 
 **Backend**
 1. The id list, forms and option lists in code; `GET /forms`; and a `check:forms` script (ids

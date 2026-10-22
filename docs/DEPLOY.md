@@ -156,7 +156,7 @@ The container **refuses to start** on a bad patch, naming the path
 (`REMOTE_CONFIG_OVERRIDES.features.nope: unknown key`). To undo: remove the line, `up -d app`
 again. See [`REMOTE_CONFIG.md`](REMOTE_CONFIG.md).
 
-### The server-driven-fields release (a clean break, run once)
+### The server-driven-fields release (a clean break — done 2026-10-22, kept for reference)
 
 Migration `20261021000000_server_driven_fields` replaces the record tables' typed columns with
 `values` maps ([`FIELDS.md`](FIELDS.md)) and **deletes every company, customer, product, settings and
@@ -178,6 +178,10 @@ production from nothing. In order, after confirming with the owner:
 5. **Publish the templates** in the new structure (the `new-invoice-template` skill's publish step, or
    `src/scripts/publishTemplate.ts`), then check `GET /templates`, `GET /forms` and one
    `GET /templates/:id/compiled` (`schemaVersion: 2`).
+
+As run: the images were built first, while the old app still served (`build app` and
+`--profile tools build migrate`). Then the app was stopped, the tables truncated, the migration run,
+and the app started. Downtime was about a minute. The templates came from `catalog/`.
 
 ## 7. Legal pages (HOA protocol 12)
 

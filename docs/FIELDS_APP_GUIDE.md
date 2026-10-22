@@ -6,10 +6,11 @@ contract**; this guide turns it into steps, settles the edge cases, and points a
 (`npm run docs:examples`). Where this guide and FIELDS.md disagree, FIELDS.md wins, and please raise
 an `APP-nnn`.
 
-> **Status.** The backend is implemented and tested but **not deployed**. Production still serves the
-> old contract until the deploy wipes it and publishes v2 templates; BE-022 will say when it's live.
-> Build and unit-test against `examples/` meanwhile. The old `edits` and dotted-path code paths don't
-> need to keep working: there are no users to migrate.
+> **Status.** **Live on `https://billanta.ferbotz.com` since 2026-10-22 (BE-022).** Production was
+> wiped and now serves only this contract. Amber, Amethyst and Cobalt are published as v2 templates;
+> Amethyst has a hideable tax column to test against. Old builds no longer work with the server, and
+> the old `edits` and dotted-path code paths don't need to keep working: there are no users to
+> migrate. `examples/` is still the place for unit tests.
 
 ## Contents
 
